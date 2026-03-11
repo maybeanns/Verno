@@ -8,9 +8,6 @@
     "vscode": "^1.80.0"
   },
   "main": "./out/extension.js",
-  "activationEvents": [
-    "onView:verno.agentPanel"
-  ],
   "contributes": {
     "commands": [
       {
@@ -44,6 +41,14 @@
       {
         "command": "verno.revealSidebar",
         "title": "Verno: Reveal Sidebar"
+      },
+      {
+        "command": "verno.newConversation",
+        "title": "Verno: New Conversation"
+      },
+      {
+        "command": "verno.processVoiceInput",
+        "title": "Verno: Process Voice Input"
       }
     ],
     "viewsContainers": {
@@ -79,11 +84,32 @@
     "configuration": {
       "title": "Verno",
       "properties": {
+        "verno.anthropicApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Anthropic API key for Claude (best coding model)"
+        },
         "verno.groqApiKey": {
           "type": "string",
           "default": "",
-          "description": "API Key for Groq (used for Voice Transcription)",
-          "scope": "application"
+          "description": "Groq API key for LLaMA fallback and cloud STT"
+        },
+        "verno.ttsEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Verno to speak responses out loud"
+        },
+        "verno.whisperMode": {
+          "type": "string",
+          "default": "hybrid",
+          "enum": ["hybrid", "local-only", "cloud-only"],
+          "description": "hybrid = auto-route for speed | local-only = enterprise privacy | cloud-only = max accuracy"
+        },
+        "verno.localWhisperModel": {
+          "type": "string",
+          "default": "base",
+          "enum": ["tiny", "base", "small", "medium", "large-v3"],
+          "description": "Local Whisper model size. large-v3 = most accurate, base = fastest"
         }
       }
     }

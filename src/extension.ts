@@ -14,6 +14,10 @@ import { RecordingStatus } from './ui/statusBar/RecordingStatus';
 import { AgentPanel } from './ui/panels/AgentPanel';
 import { SidebarProvider } from './ui/panels/SidebarProvider';
 import { EnhancedSidebarProvider } from './ui/panels/EnhancedSidebarProvider';
+import { ConversationEngine } from './services/conversationEngine';
+import { TTSService } from './services/ttsService';
+import { LocalWhisperService } from './services/localWhisperService';
+import { setLocalWhisperInstance, setGroqProviderInstance } from './services/audioRouter';
 
 let logger: Logger;
 let configService: ConfigService;
@@ -24,6 +28,9 @@ let recordingStatus: RecordingStatus;
 let agentPanel: AgentPanel;
 let sidebarProvider: SidebarProvider;
 let conversationService: ConversationService;
+let brain: ConversationEngine;
+let tts: TTSService;
+let localWhisper: LocalWhisperService;
 let currentConversationId: string | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -37,8 +44,22 @@ export async function activate(context: vscode.ExtensionContext) {
 		llmService = new LLMService();
 		recordingStatus = new RecordingStatus();
 		agentPanel = new AgentPanel(context);
+		brain = new ConversationEngine();
+		tts = new TTSService();
+		localWhisper = new LocalWhisperService();
 
 		logger.info('Initializing Verno extension...');
+
+		// Background-initialize TTS and local Whisper (non-blocking)
+		tts.initialize(context.extensionPath).catch(err => {
+			logger.warn(`TTS background init failed: ${err}`);
+		});
+		localWhisper.initialize(context.extensionPath).then(() => {
+			setLocalWhisperInstance(localWhisper);
+			logger.info('Local Whisper initialized and registered with AudioRouter');
+		}).catch(err => {
+			logger.warn(`Local Whisper background init failed: ${err}`);
+		});
 
 		// Initialize ConversationService for persistence
 		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
@@ -177,7 +198,57 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 		});
 
-		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd);
+		// Process voice input command — the core conversational loop entry point
+		const processVoiceCmd = vscode.commands.registerCommand('verno.processVoiceInput', async (transcribedText: string) => {
+			if (!transcribedText || transcribedText.trim().length === 0) {
+				logger.warn('Empty voice input received');
+				return;
+			}
+
+			// Show transcription in status bar
+			vscode.window.setStatusBarMessage(`🎙️ "${transcribedText}"`, 3000);
+			logger.info(`Voice input: "${transcribedText}"`);
+
+			try {
+				// Think — LLM generates reply with full workspace context
+				const reply = await brain.think(transcribedText);
+
+				// Speak — TTS plays reply out loud
+				tts.speak(reply).catch(err => {
+					logger.warn(`TTS speak failed: ${err}`);
+				});
+
+				// Show in sidebar conversation panel
+				agentPanel.addMessage('user', transcribedText, { silent: false });
+				agentPanel.addMessage('assistant', reply, { silent: false });
+
+				// Persist to ConversationService
+				if (conversationService) {
+					try {
+						const convId = ensureConversation('ask');
+						conversationService.addMessage(convId, 'user', transcribedText);
+						conversationService.addMessage(convId, 'assistant', reply);
+					} catch (convErr) {
+						logger.warn(`Conversation persistence error: ${convErr}`);
+					}
+				}
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				logger.error('Voice processing error', err as Error);
+				agentPanel.addMessage('system', `Error: ${msg}`);
+			}
+		});
+
+		// New conversation command — clears history and announces
+		const newConversationCmd = vscode.commands.registerCommand('verno.newConversation', async () => {
+			brain.clearHistory();
+			logger.info('Conversation history cleared');
+			tts.speak('Starting fresh. What are we working on?').catch(err => {
+				logger.warn(`TTS speak failed on new conversation: ${err}`);
+			});
+		});
+
+		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd, processVoiceCmd, newConversationCmd);
 
 		logger.info('Verno extension activated successfully');
 		vscode.window.showInformationMessage('Verno extension is ready!');
@@ -389,6 +460,8 @@ async function processUserInput(
 
 export function deactivate() {
 	recordingStatus.dispose();
+	try { tts?.dispose(); } catch { /* ignore */ }
+	try { localWhisper?.dispose(); } catch { /* ignore */ }
 	logger.info('Verno extension deactivated');
 	logger.dispose();
 }
