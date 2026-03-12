@@ -1,4 +1,7 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { Logger } from './utils/logger';
 import { ConfigService } from './config/ConfigService';
 import { LLMService, GeminiProvider, GroqProvider } from './services/llm';
@@ -18,6 +21,7 @@ import { ConversationEngine } from './services/conversationEngine';
 import { TTSService } from './services/ttsService';
 import { LocalWhisperService } from './services/localWhisperService';
 import { setLocalWhisperInstance, setGroqProviderInstance } from './services/audioRouter';
+import { AudioSanitizer } from './services/audioSanitizer';
 
 let logger: Logger;
 let configService: ConfigService;
@@ -31,7 +35,32 @@ let conversationService: ConversationService;
 let brain: ConversationEngine;
 let tts: TTSService;
 let localWhisper: LocalWhisperService;
+let audioSanitizer: AudioSanitizer;
 let currentConversationId: string | null = null;
+
+async function cleanupStaleAudioFiles(logger: Logger) {
+	try {
+		const tmpDir = os.tmpdir();
+		const files = await fs.promises.readdir(tmpDir);
+		const staleFiles = files.filter(f => f.startsWith('verno_recording_') && f.endsWith('.wav'));
+
+		let deletedCount = 0;
+		for (const file of staleFiles) {
+			const filePath = path.join(tmpDir, file);
+			try {
+				await fs.promises.unlink(filePath);
+				deletedCount++;
+			} catch (err) {
+				logger.warn(`Failed to delete stale audio file ${file}: ${err}`);
+			}
+		}
+		if (deletedCount > 0) {
+			logger.info(`Cleaned up ${deletedCount} stale audio file(s)`);
+		}
+	} catch (err) {
+		logger.warn(`Could not scan tmpdir for stale audio files: ${err}`);
+	}
+}
 
 export async function activate(context: vscode.ExtensionContext) {
 	try {
@@ -47,8 +76,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		brain = new ConversationEngine();
 		tts = new TTSService();
 		localWhisper = new LocalWhisperService();
+		audioSanitizer = new AudioSanitizer();
 
 		logger.info('Initializing Verno extension...');
+
+		// Cleanup stale audio files left over from previous sessions
+		cleanupStaleAudioFiles(logger);
 
 		// Background-initialize TTS and local Whisper (non-blocking)
 		tts.initialize(context.extensionPath).catch(err => {
@@ -207,11 +240,17 @@ export async function activate(context: vscode.ExtensionContext) {
 
 			// Show transcription in status bar
 			vscode.window.setStatusBarMessage(`🎙️ "${transcribedText}"`, 3000);
-			logger.info(`Voice input: "${transcribedText}"`);
+			logger.info(`Voice input (raw): "${transcribedText}"`);
+
+			// Sanitize: correct misheard identifiers against active file symbols
+			const sanitizedText = await audioSanitizer.sanitize(transcribedText);
+			if (sanitizedText !== transcribedText) {
+				logger.info(`Voice input (sanitized): "${sanitizedText}"`);
+			}
 
 			try {
 				// Think — LLM generates reply with full workspace context
-				const reply = await brain.think(transcribedText);
+				const reply = await brain.think(sanitizedText);
 
 				// Speak — TTS plays reply out loud
 				tts.speak(reply).catch(err => {
@@ -219,14 +258,14 @@ export async function activate(context: vscode.ExtensionContext) {
 				});
 
 				// Show in sidebar conversation panel
-				agentPanel.addMessage('user', transcribedText, { silent: false });
+				agentPanel.addMessage('user', sanitizedText, { silent: false });
 				agentPanel.addMessage('assistant', reply, { silent: false });
 
 				// Persist to ConversationService
 				if (conversationService) {
 					try {
 						const convId = ensureConversation('ask');
-						conversationService.addMessage(convId, 'user', transcribedText);
+						conversationService.addMessage(convId, 'user', sanitizedText);
 						conversationService.addMessage(convId, 'assistant', reply);
 					} catch (convErr) {
 						logger.warn(`Conversation persistence error: ${convErr}`);
