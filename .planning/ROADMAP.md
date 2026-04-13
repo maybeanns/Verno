@@ -36,9 +36,9 @@ Verno owns the full 9-phase Software Development Life Cycle — from debate-driv
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: Secure API Key Storage — migrate to vscode.SecretStorage
-- [ ] 01-02: Webview Message Security — allowlist validation + CSP audit
-- [ ] 01-03: Extension Metadata & Logger Polish — version, publisher, output paths
+- [x] 01-01: Secure API Key Storage — migrate to vscode.SecretStorage
+- [x] 01-02: Webview Message Security — allowlist validation + CSP audit
+- [x] 01-03: Extension Metadata & Logger Polish — version, publisher, output paths
 
 ### Phase 2: Conversational Mode Upgrade
 **Goal**: Transform the basic chat mode into a true SDLC-aware conversational advisor that interprets workspace context and delivers real-time insights.
