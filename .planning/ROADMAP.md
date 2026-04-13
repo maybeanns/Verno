@@ -1,104 +1,122 @@
-# Verno v1.0 — Roadmap
+# Roadmap: Verno
 
-## Milestone: Industry-Grade Foundation
+## Overview
 
-**Goal:** Harden Verno from working MVP to industry-grade VSCode extension — secure credentials, multi-provider LLM support, comprehensive tests, CI/CD, and polished UX.
+Transform Verno from a working MVP into an industry-grade, publishable VSCode extension. Six phases move through security hardening, multi-provider LLM support, comprehensive test coverage, persistent RAG storage, CI/CD automation, and final polish for FYP evaluation and marketplace readiness.
 
-**Target:** FYP evaluation ready + potential VSCode Marketplace submission.
+## Phases
 
----
+- [ ] **Phase 1: Security & Extension Foundation** - Secure credentials, webview guards, extension metadata polish
+- [ ] **Phase 2: Multi-Provider LLM Support** - Anthropic + OpenAI providers, model selection UI
+- [ ] **Phase 3: Test Infrastructure & Coverage** - MockLLMService, agent unit tests, real E2E tests
+- [ ] **Phase 4: Persistent Vector Store & RAG Hardening** - Disk-backed VectorStore, file-change invalidation
+- [ ] **Phase 5: CI/CD Pipeline & Streaming Markdown UI** - GitHub Actions CI, streaming markdown renderer
+- [ ] **Phase 6: Polish, Documentation & VSIX Package** - UX polish, docs, final package
 
-## Phase 1 — Security & Extension Foundation
-**Goal:** Fix critical security issues and extension metadata. No-regression baseline.
+## Phase Details
 
-**Depends on:** Codebase map (done)
+### Phase 1: Security & Extension Foundation
+**Goal**: Fix critical security issues and extension metadata. Establish a clean, no-regression baseline.
+**Depends on**: Nothing (first phase)
+**Requirements**: SEC-01, SEC-02, SEC-03, EXT-01, EXT-02, EXT-03
+**Success Criteria** (what must be TRUE):
+  1. API keys are stored via VSCode SecretStorage — never prompted via dialog on repeat sessions
+  2. Webview message handlers reject unknown message types
+  3. Extension output channel does not auto-open on activation
+  4. Agent artifacts write to `.verno/` only, not workspace root
+  5. Extension version is 0.2.0, publisher is set correctly
+**Plans**: 3 plans
 
-### Plans
-1. **Secure API Key Storage** — Migrate all API keys from inputBox to `vscode.SecretStorage`. Add `getApiKey()` / `storeApiKey()` helpers in ConfigService. Update all providers. [SEC-01]
-2. **Webview Message Security** — Add `message.type` validation + allowlist in AgentPanel, EnhancedSidebarProvider, SDLCWebviewPanel. [SEC-02, SEC-03]
-3. **Extension Metadata & Logger Polish** — Bump version to `0.2.0`, set publisher, remove auto `logger.show()`, suppress `IMPLEMENTATION.md` workspace dump, route all agent output to `.verno/`. [EXT-01, EXT-02, EXT-03]
+Plans:
+- [ ] 01-01: Secure API Key Storage — migrate keys to vscode.SecretStorage
+- [ ] 01-02: Webview Message Security — validate message.type in all panels
+- [ ] 01-03: Extension Metadata & Logger Polish — version bump, remove logger.show(), fix output paths
 
-**UAT:** API keys are not prompted via dialog on fresh install; stored keys persist across restarts. Webview rejects unknown message types. Output channel not auto-opened.
+### Phase 2: Multi-Provider LLM Support
+**Goal**: Implement Anthropic and OpenAI providers; surface provider/model selection in the UI.
+**Depends on**: Phase 1
+**Requirements**: PRV-01, PRV-02, PRV-03, DIF-01, DIF-02
+**Success Criteria** (what must be TRUE):
+  1. User can select Gemini / Groq / Anthropic / OpenAI from a dropdown in the chat panel
+  2. Selected model persists across extension restarts
+  3. Agents respond correctly using the chosen provider
+  4. Token usage counter visible in the UI
+**Plans**: 3 plans
 
----
+Plans:
+- [ ] 02-01: Anthropic Claude Provider — full streaming implementation
+- [ ] 02-02: OpenAI Provider — full streaming implementation
+- [ ] 02-03: Provider Selection UI — model dropdown in AgentPanel, persist to settings
 
-## Phase 2 — Multi-Provider LLM Support
-**Goal:** Implement Anthropic and OpenAI providers; add model selection UI.
+### Phase 3: Test Infrastructure & Coverage
+**Goal**: Establish injectable mock LLM, write agent/service unit tests, fix Playwright E2E skeleton.
+**Depends on**: Phase 1
+**Requirements**: TST-01, TST-02, TST-03, TST-04, TST-05
+**Success Criteria** (what must be TRUE):
+  1. `npm test` passes all unit tests with zero failures
+  2. DeveloperAgent, OrchestratorAgent, ConversationEngine have meaningful test cases
+  3. Playwright E2E test: extension activates, panel renders, submit returns a response
+  4. Coverage report shows ≥80% on critical agents and services
+**Plans**: 3 plans
 
-**Depends on:** Phase 1 (SecretStorage in place)
+Plans:
+- [ ] 03-01: MockLLMService & Test Harness — injectable mock, test helpers, factories
+- [ ] 03-02: Agent Unit Tests — DeveloperAgent, OrchestratorAgent, ConversationEngine
+- [ ] 03-03: E2E Playwright Tests — real assertions for activation + chat flow
 
-### Plans
-1. **Anthropic Provider** — Implement `AnthropicProvider` using `@anthropic-ai/sdk`. Support `claude-3-5-sonnet-20241022` and `claude-3-haiku-20240307`. Wire streaming. [PRV-01]
-2. **OpenAI Provider** — Implement `OpenAIProvider` using `openai` SDK. Support `gpt-4o` and `gpt-4o-mini`. Wire streaming. [PRV-02]
-3. **Provider Selection UI** — Add model/provider selector dropdown to AgentPanel webview. Persist choice to VSCode settings. Show active model in status bar. [PRV-03, DIF-01]
+### Phase 4: Persistent Vector Store & RAG Hardening
+**Goal**: Replace in-memory VectorStore with disk-backed persistence; add file-change invalidation.
+**Depends on**: Phase 3
+**Requirements**: STR-01, STR-02
+**Success Criteria** (what must be TRUE):
+  1. After extension restart, RAG context retrieved without cold-start re-indexing delay
+  2. Index updates within 2s of file save
+  3. Existing unit tests for RAG pipeline still pass
+**Plans**: 3 plans
 
-**UAT:** User can switch between Gemini/Groq/Anthropic/OpenAI in dropdown. Agents respond using selected provider. Token usage visible. [DIF-02]
+Plans:
+- [ ] 04-01: Disk-Backed VectorStore — JSON serialization to .verno/index/vectors.json
+- [ ] 04-02: File Change Invalidation — FileSystemWatcher triggers incremental re-index
+- [ ] 04-03: RAG Quality Improvements — hybrid BM25+cosine ranking, token-budget context trimming
 
----
+### Phase 5: CI/CD Pipeline & Streaming Markdown UI
+**Goal**: GitHub Actions CI pipeline + streaming markdown rendering in chat panel.
+**Depends on**: Phase 3
+**Requirements**: TST-06, EXT-04, DIF-03
+**Success Criteria** (what must be TRUE):
+  1. GitHub Actions workflow runs lint → compile → test on every push/PR to main
+  2. Code blocks in chat panel render with syntax highlighting
+  3. AI code review result visible in Feedback tab after code generation
+**Plans**: 3 plans
 
-## Phase 3 — Test Infrastructure & Coverage
-**Goal:** Establish MockLLMService, write unit tests for critical agents and services, fix Playwright E2E skeleton.
+Plans:
+- [ ] 05-01: GitHub Actions CI — lint + compile + unit-test + e2e workflow
+- [ ] 05-02: Streaming Markdown Renderer — marked.js + highlight.js in AgentPanel
+- [ ] 05-03: CodeReviewAgent Integration — wire into BMAD pipeline post-DeveloperAgent
 
-**Depends on:** Phase 1 (clean extension base), Phase 2 (providers stable)
+### Phase 6: Polish, Documentation & VSIX Package
+**Goal**: FYP-ready deliverable with polished UX, comprehensive docs, and packaged VSIX.
+**Depends on**: Phase 4, Phase 5
+**Requirements**: All remaining
+**Success Criteria** (what must be TRUE):
+  1. Fresh VSIX install works end-to-end with zero manual config beyond API key entry
+  2. README accurately documents all features with architecture diagram
+  3. `vsce package` produces a valid `.vsix` at version 1.0.0
+  4. Manual smoke test: voice → transcript → agent response → TTS playback — works end-to-end
+**Plans**: 3 plans
 
-### Plans
-1. **MockLLMService & Test Harness** — Create `MockLLMService` implementing `ILLMService`. Add `createMockContext()` factory. Establish test helpers in `tests/helpers/`. [TST-01]
-2. **Agent Unit Tests** — Tests for DeveloperAgent (parseCodeFiles, quality check routing), OrchestratorAgent (mode routing), ConversationEngine (history, context building). [TST-02, TST-03, TST-04]
-3. **E2E Playwright Tests** — Real assertions: extension activates, AgentPanel renders, text input produces assistant response, conversation persists to disk. [TST-05]
+Plans:
+- [ ] 06-01: UX Polish — onboarding wizard, keyboard shortcuts, welcome page
+- [ ] 06-02: Documentation — README update, CONTRIBUTING.md, JSDoc all public APIs
+- [ ] 06-03: Package & Validate — vsce package, smoke test, version bump to 1.0.0
 
-**UAT:** `npm test` passes all tests. Coverage report shows ≥80% on agents/services.
+## Progress
 
----
-
-## Phase 4 — Persistent Vector Store & RAG Hardening
-**Goal:** Replace in-memory VectorStore with disk-backed persistence. Add file-change invalidation.
-
-**Depends on:** Phase 3 (tests cover RAG pipeline before refactor)
-
-### Plans
-1. **Disk-Backed VectorStore** — Serialize index to `.verno/index/vectors.json` on write. Load on init. LRU eviction for memory cap. [STR-01]
-2. **File Change Invalidation** — `vscode.workspace.createFileSystemWatcher` invalidates index entries on file save/delete. Triggers incremental re-index. [STR-02]
-3. **RAG Quality Improvements** — Add re-ranking pass (BM25 + cosine hybrid). Limit context to top-K chunks with token budget awareness. Add telemetry logging for retrieval quality.
-
-**UAT:** After restart, RAG context retrieved without re-indexing wait. Index updates within 2s of file save.
-
----
-
-## Phase 5 — CI/CD Pipeline & Markdown Streaming UI
-**Goal:** GitHub Actions CI pipeline + streaming markdown in chat panel.
-
-**Depends on:** Phase 3 (tests must pass in CI)
-
-### Plans
-1. **GitHub Actions CI** — Workflow: `lint → compile → unit-test → e2e-test` on push/PR to main. Cache node_modules. Upload test results artifact. [TST-06]
-2. **Streaming Markdown Renderer** — Replace plain-text `addMessage()` with `marked.js` rendering. Support: fenced code blocks with syntax highlight (highlight.js), bold, italic, lists, tables. Stream tokens into DOM progressively. [EXT-04]
-3. **CodeReviewAgent Integration** — Wire `CodeReviewAgent` into BMAD pipeline: runs after `DeveloperAgent`, before `TechWriterAgent`. Output appended to feedback panel. [DIF-03]
-
-**UAT:** GitHub Actions green on clean push. Code blocks render with syntax highlighting. AI review visible in Feedback tab after code generation.
-
----
-
-## Phase 6 — Polish, Documentation & VSIX Package
-**Goal:** FYP-ready deliverable — polished UX, comprehensive docs, packaged VSIX.
-
-**Depends on:** All prior phases
-
-### Plans
-1. **UX Polish Pass** — Onboarding flow for first-time users (API key setup wizard). Keyboard shortcut for voice start/stop. Welcome page with quick-start guide.
-2. **Documentation** — Update README with full feature set, architecture diagram, setup guide. Add CONTRIBUTING.md, CHANGELOG.md with real entries. JSDoc all public interfaces.
-3. **Package & Validate** — `vsce package` → produce final `.vsix`. Validate in clean VSCode install. Verify all features work end-to-end. Update `version` to `1.0.0`.
-
-**UAT:** Fresh VSCode install of VSIX works with zero manual config beyond API key entry. All README features functional.
-
----
-
-## Progress Summary
-
-| Phase | Status | Key Deliverable |
-|-------|--------|-----------------|
-| Phase 1 — Security | 🔲 Not started | SecretStorage, webview guards, metadata |
-| Phase 2 — Multi-Provider | 🔲 Not started | Anthropic + OpenAI providers |
-| Phase 3 — Tests | 🔲 Not started | MockLLM + agent unit tests + E2E |
-| Phase 4 — Persistent RAG | 🔲 Not started | Disk-backed VectorStore |
-| Phase 5 — CI + Markdown | 🔲 Not started | GitHub Actions + streaming UI |
-| Phase 6 — Polish + VSIX | 🔲 Not started | Final FYP deliverable |
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. Security & Extension Foundation | 0/3 | Not started | - |
+| 2. Multi-Provider LLM Support | 0/3 | Not started | - |
+| 3. Test Infrastructure & Coverage | 0/3 | Not started | - |
+| 4. Persistent Vector Store & RAG Hardening | 0/3 | Not started | - |
+| 5. CI/CD Pipeline & Streaming Markdown UI | 0/3 | Not started | - |
+| 6. Polish, Documentation & VSIX Package | 0/3 | Not started | - |
