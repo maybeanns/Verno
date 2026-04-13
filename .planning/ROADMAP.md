@@ -67,7 +67,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: Security Persona in Debate — 8th agent with OWASP/GDPR focus
+- [x] 03-01: Security Persona in Debate — 8th agent with OWASP/GDPR focus
 - [ ] 03-02: Ambiguity Detector + PRD Versioning — flag vague terms, persist revisions
 - [ ] 03-03: Requirements Traceability Matrix — link PRD sections to Epic IDs
 
