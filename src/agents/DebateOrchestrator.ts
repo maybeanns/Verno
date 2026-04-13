@@ -1,0 +1,302 @@
+/**
+ * DebateOrchestrator — 8-agent multi-round PRD debate engine.
+ *
+ * Agents:
+ *  1. analyst      — Business requirements, KPIs, user value
+ *  2. architect    — Backend scalability, data models, API design
+ *  3. ux           — User flows, interfaces, accessibility
+ *  4. developer    — Code structure, technical feasibility, components
+ *  5. pm           — Scope, milestones, prioritization
+ *  6. qa           — Edge cases, testability, test plans
+ *  7. techwriter   — Documentation, readability, API references
+ *  8. security     — OWASP Top 10, GDPR/HIPAA, threat modeling  ← new in Phase 3
+ *
+ * The security agent shifts vulnerability discovery LEFT — catching
+ * compliance requirements and attack surface concerns at the PRD stage,
+ * before a single line of code is written.
+ */
+
+import * as vscode from 'vscode';
+import { DebateMessage, PRDDocument, PRDSection } from '../types/sdlc';
+import { LLMService } from '../services/llm';
+import { Logger } from '../utils/logger';
+import { VernoArtifactService } from '../services/artifact/VernoArtifactService';
+
+// ─── OWASP / Compliance constants ────────────────────────────────────────────
+
+const GDPR_KEYWORDS = [
+    'email', 'name', 'address', 'phone', 'user data', 'personal', 'profile',
+    'location', 'analytics', 'tracking', 'cookie', 'consent', 'identity', 'ip address'
+];
+
+const HIPAA_KEYWORDS = [
+    'health', 'medical', 'diagnosis', 'patient', 'prescription', 'clinical',
+    'symptom', 'doctor', 'hospital', 'lab result', 'ehr', 'phi', 'treatment'
+];
+
+// Top OWASP categories likely relevant to any software project
+const OWASP_BASELINE_CHECKLIST = [
+    'A01: Broken Access Control — verify role-based permissions on every endpoint',
+    'A02: Cryptographic Failures — ensure secrets, tokens, and PII are encrypted at rest and in transit',
+    'A03: Injection — sanitize all user inputs (SQL, command, LDAP, XPath)',
+    'A05: Security Misconfiguration — disable debug modes and default credentials in production',
+    'A07: Identification & Authentication Failures — enforce MFA and secure session management',
+    'A09: Security Logging & Monitoring Failures — log auth events and anomalies with alerting',
+];
+
+// ─── Agent definitions ────────────────────────────────────────────────────────
+
+const DEBATE_AGENTS = [
+    { id: 'analyst',    role: 'Business Analyst (Focus on business requirements, KPIs, and user value)' },
+    { id: 'architect',  role: 'System Architect (Focus on backend scalability, data models, and API design)' },
+    { id: 'ux',         role: 'UX Designer (Focus on user flows, interfaces, and accessibility)' },
+    { id: 'developer',  role: 'Developer (Focus on code structure, technical feasibility, and components)' },
+    { id: 'pm',         role: 'Product Manager (Focus on scope, milestones, and prioritization)' },
+    { id: 'qa',         role: 'QA Engineer (Focus on edge cases, testability, and test plans)' },
+    { id: 'techwriter', role: 'Technical Writer (Focus on documentation, readability, and API references)' },
+    {
+        id: 'security',
+        role: 'Security Engineer (Focus on OWASP Top 10 attack vectors, authentication and authorization design, data classification (PII/PHI), GDPR/HIPAA compliance requirements, secret management, and threat modeling for all proposed features)'
+    },
+] as const;
+
+// ─── DebateOrchestrator ───────────────────────────────────────────────────────
+
+export class DebateOrchestrator {
+    private llmService: LLMService;
+    private logger: Logger;
+
+    constructor(llmService: LLMService, logger: Logger) {
+        this.llmService = llmService;
+        this.logger = logger;
+    }
+
+    // ── Public ──────────────────────────────────────────────────────────────
+
+    public async runDebate(
+        topic: string,
+        onMessage: (msg: DebateMessage) => void,
+        previousMessages: DebateMessage[] = []
+    ): Promise<PRDDocument> {
+        this.logger.info(`[DebateOrchestrator] Starting 8-agent debate: "${topic}"`);
+
+        let history = [...previousMessages];
+        const numRounds = 3;
+
+        // ── Phase A: Multi-round debate ────────────────────────────────────
+        for (let round = 1; round <= numRounds; round++) {
+            this.logger.info(`  Round ${round}/${numRounds}`);
+            for (const agent of DEBATE_AGENTS) {
+                const prompt = this.buildPrompt(topic, agent.id, agent.role, history, round);
+                const response = await this.llmService.generateText(prompt);
+
+                const msg: DebateMessage = {
+                    agentId: agent.id,
+                    content: response.trim(),
+                    round,
+                    timestamp: Date.now(),
+                    type: round === 1 ? 'argument' : 'counter',
+                };
+                history.push(msg);
+                onMessage(msg);
+            }
+        }
+
+        // ── Phase B: Convergence / PM consensus ───────────────────────────
+        this.logger.info('  Convergence phase');
+        const convergencePrompt = `You are the Product Manager who has chaired the debate.
+The 3-round debate among the 8 BMAD agents (including the Security Engineer) has concluded.
+Original Topic: ${topic}
+
+Full Debate Transcript:
+${history.map(m => `[${m.agentId.toUpperCase()}]: ${m.content}`).join('\n\n')}
+
+Synthesize the debate into a single executive consensus. Resolve disagreements authoritatively.
+Include any security concerns and compliance requirements raised by the Security Engineer.
+Keep it concise but authoritative (max 250 words).`;
+
+        const convergenceResponse = await this.llmService.generateText(convergencePrompt);
+        const convergenceMsg: DebateMessage = {
+            agentId: 'pm',
+            content: convergenceResponse.trim(),
+            round: numRounds + 1,
+            timestamp: Date.now(),
+            type: 'consensus',
+        };
+        history.push(convergenceMsg);
+        onMessage(convergenceMsg);
+
+        // ── Phase C: PRD generation ────────────────────────────────────────
+        this.logger.info('  PRD generation');
+        const prdPrompt = `You are a Technical Product Manager. Based on the following debate and executive summary, generate a formal Product Requirements Document (PRD).
+
+Original Topic: ${topic}
+
+Debate History & Consensus:
+${history.map(m => `[${m.agentId.toUpperCase()}]: ${m.content}`).join('\n\n')}
+
+Respond ONLY with valid JSON — an array of section objects. No markdown fences. No keys other than "title" and "content".
+
+Required sections (in this order):
+[
+  { "title": "Overview", "content": "Executive summary of the feature/product" },
+  { "title": "Problem Statement", "content": "The specific problem being solved and user pain points" },
+  { "title": "Goals & Non-Goals", "content": "What success looks like and what is explicitly out of scope" },
+  { "title": "User Stories", "content": "User stories in 'As a <role>, I want <capability> so that <benefit>' format" },
+  { "title": "Technical Specifications", "content": "Architecture decisions, API contracts, data models, integrations" },
+  { "title": "Security & Compliance", "content": "MUST include: (1) OWASP Top 10 checklist items relevant to this feature, (2) Data classification (PII/PHI present?), (3) GDPR consent requirements if personal data is collected, (4) HIPAA requirements if health data is processed, (5) Threat model summary, (6) Required security controls and mitigations" },
+  { "title": "Acceptance Criteria", "content": "Testable, measurable conditions that define feature completeness" },
+  { "title": "Risks & Mitigations", "content": "Technical, business, and security risks with mitigation strategies" }
+]`;
+
+        let prdJson = await this.llmService.generateText(prdPrompt);
+        prdJson = prdJson.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+        let sections: PRDSection[] = [];
+        try {
+            sections = JSON.parse(prdJson);
+        } catch (e) {
+            this.logger.error('Failed to parse PRD JSON', e as Error);
+            sections = [{
+                title: 'Overview and Synthesis',
+                content: convergenceResponse,
+                complianceFlags: []
+            }];
+        }
+
+        // ── Phase D: GDPR/HIPAA compliance scan ───────────────────────────
+        sections = this.detectComplianceFlags(sections);
+
+        // Append OWASP baseline to Security section
+        sections = this.injectOwaspChecklist(sections);
+
+        const prdDocument: PRDDocument = {
+            title: `PRD: ${topic.substring(0, 80)}`,
+            sections,
+            status: 'draft',
+        };
+
+        this.writePRDToFile(prdDocument);
+        this.logger.info(`[DebateOrchestrator] PRD complete — ${sections.length} sections`);
+
+        return prdDocument;
+    }
+
+    // ── Private helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Build an agent-specific debate prompt.
+     * The security agent gets a hardened prompt that probes for attack vectors,
+     * data classification needs, and compliance requirements.
+     */
+    private buildPrompt(
+        topic: string,
+        agentId: string,
+        role: string,
+        history: DebateMessage[],
+        round: number
+    ): string {
+        const historyText = history.length === 0
+            ? 'No prior messages.'
+            : history.map(m => `[${m.agentId.toUpperCase()}]: ${m.content}`).join('\n\n');
+
+        const baseInstruction = round === 1
+            ? 'State your initial perspective, identifying key priorities and potential challenges from your domain.'
+            : 'Respond to your colleagues\' points. Defend your domain\'s needs, suggest compromises, or highlight issues in their proposals.';
+
+        const securityAddendum = agentId === 'security'
+            ? `
+As Security Engineer, ALWAYS address:
+1. What attack vectors exist in the proposed feature? (reference OWASP Top 10 categories)
+2. Does this feature collect or process PII or health data? (flag for GDPR/HIPAA)
+3. What authentication and authorization model is required?
+4. Are there any insecure defaults, hardcoded secrets, or misconfiguration risks?
+5. What threat model applies (spoofing, tampering, repudiation, info disclosure, DoS, elevation)?
+Be specific and non-negotiable on security requirements.`
+            : '';
+
+        return `You are the ${role} in a team debate on:
+Topic: ${topic}
+
+Debate history so far:
+${historyText}
+
+This is Round ${round}. ${baseInstruction}${securityAddendum}
+
+Keep your response under 150 words. Be direct, professional, and represent your role's priorities firmly.`;
+    }
+
+    /**
+     * Scan each PRD section for GDPR and HIPAA keyword signals.
+     * Attaches human-readable warning strings to `complianceFlags`.
+     */
+    private detectComplianceFlags(sections: PRDSection[]): PRDSection[] {
+        return sections.map(section => {
+            const lower = section.content.toLowerCase();
+            const flags: string[] = [...(section.complianceFlags ?? [])];
+
+            const hasGdpr = GDPR_KEYWORDS.some(k => lower.includes(k));
+            const hasHipaa = HIPAA_KEYWORDS.some(k => lower.includes(k));
+
+            if (hasGdpr) {
+                flags.push('⚠️ GDPR: Personal data detected — add explicit consent mechanism, data retention policy, and right-to-erasure support');
+            }
+            if (hasHipaa) {
+                flags.push('⚠️ HIPAA: Health data detected — encryption at rest (AES-256) and in transit (TLS 1.3), audit logging, and Business Associate Agreement required');
+            }
+
+            return { ...section, complianceFlags: flags };
+        });
+    }
+
+    /**
+     * Find the "Security & Compliance" section and append the OWASP baseline checklist
+     * if it isn't already present in the generated content.
+     */
+    private injectOwaspChecklist(sections: PRDSection[]): PRDSection[] {
+        return sections.map(section => {
+            if (section.title.toLowerCase().includes('security')) {
+                const hasOwasp = section.content.toLowerCase().includes('owasp') ||
+                                 section.content.toLowerCase().includes('a01');
+                if (!hasOwasp) {
+                    const checklist = '\n\n**OWASP Top 10 Baseline Checklist:**\n' +
+                        OWASP_BASELINE_CHECKLIST.map(item => `- ${item}`).join('\n');
+                    return { ...section, content: section.content + checklist };
+                }
+            }
+            return section;
+        });
+    }
+
+    /**
+     * Write PRD to `.verno/PRD.md` with compliance flag badges rendered inline.
+     */
+    private writePRDToFile(prd: PRDDocument): void {
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!root) { return; }
+
+        const artifacts = new VernoArtifactService(root);
+
+        let md = `# ${prd.title}\n\n`;
+        md += `> **Status:** ${prd.status.toUpperCase()} — Generated by Verno SDLC Engine\n\n`;
+        md += `---\n\n`;
+
+        for (const section of prd.sections) {
+            md += `## ${section.title}\n\n${section.content}\n\n`;
+
+            if (section.complianceFlags && section.complianceFlags.length > 0) {
+                md += `> **Compliance Flags:**\n`;
+                for (const flag of section.complianceFlags) {
+                    md += `> - ${flag}\n`;
+                }
+                md += '\n';
+            }
+
+            md += '---\n\n';
+        }
+
+        artifacts.write('PRD.md', md);
+        artifacts.writeJSON('prd.json', prd);
+        this.logger.info(`[DebateOrchestrator] PRD written to .verno/PRD.md and .verno/prd.json`);
+    }
+}

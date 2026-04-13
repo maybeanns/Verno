@@ -5,6 +5,15 @@ import { getConversationHTML } from '../templates/conversationTemplate';
 import { LLMService } from '../../services/llm';
 import { WindowsVoiceRecorder } from '../../services/voice/WindowsVoiceRecorder';
 import { AudioSanitizer } from '../../services/audioSanitizer';
+import { validateWebviewMessage, generateNonce } from '../../utils/webviewSecurity';
+
+/** Allowlist of message types this sidebar accepts from its webview. */
+const SIDEBAR_ALLOWED_TYPES = [
+    'processInputSubmit', 'start-sdlc', 'newTask', 'listConversations',
+    'loadConversation', 'deleteConversation', 'mcpInstall', 'triggerUpload',
+    'startRecording', 'vadAudioData', 'stopRecording', 'voiceConversationComplete',
+    'voiceSessionEnded', 'log', 'showOutput', 'webviewReady'
+] as const;
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'verno.agentPanel';
@@ -41,12 +50,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         this.logger?.info('SidebarProvider resolved with conversation UI');
 
-        // Handle messages from the webview
-        webviewView.webview.onDidReceiveMessage(async (data) => {
+        // Handle messages from the webview — allowlist validated
+        webviewView.webview.onDidReceiveMessage(async (message) => {
+            if (!validateWebviewMessage(message, SIDEBAR_ALLOWED_TYPES, this.logger)) { return; }
+            const data = message as any; // type validated above
             this.logger.info(`Message received: ${data.type}`);
             switch (data.type) {
                 case 'processInputSubmit':
                     await vscode.commands.executeCommand('verno.processInputWithData', data.apiKey, data.input, data.mode, data.model);
+                    break;
+                case 'start-sdlc':
+                    await vscode.commands.executeCommand('verno.startSDLC', data.input);
                     break;
                 case 'newTask':
                     await vscode.commands.executeCommand('verno.newTask');
@@ -296,10 +310,5 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 }
 
 function getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
+    return generateNonce();
 }
