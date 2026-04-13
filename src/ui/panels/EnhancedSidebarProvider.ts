@@ -1,13 +1,16 @@
-/**
- * Enhanced Sidebar with TODO, Feedback, and Conversation Panels
- */
-
 import * as vscode from 'vscode';
 import { Logger } from '../../utils/logger';
 import { TodoService } from '../../services/todo';
 import { FeedbackService } from '../../services/feedback';
 import { ConversationService } from '../../services/conversation';
 import * as path from 'path';
+import { validateWebviewMessage, generateNonce } from '../../utils/webviewSecurity';
+
+/** Allowlist of message types accepted by the Enhanced Sidebar. */
+const ENHANCED_ALLOWED_TYPES = [
+    'getTodos', 'getFeedback', 'getConversations',
+    'loadConversation', 'deleteConversation', 'updateTodoStatus'
+] as const;
 
 export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'verno-enhanced-sidebar';
@@ -43,8 +46,10 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
 
-        // Handle messages from the webview
-        webviewView.webview.onDidReceiveMessage(async (data) => {
+        // Handle messages from the webview — allowlist validated
+        webviewView.webview.onDidReceiveMessage(async (message) => {
+            if (!validateWebviewMessage(message, ENHANCED_ALLOWED_TYPES, this.logger)) { return; }
+            const data = message as any; // type validated above
             try {
                 switch (data.type) {
                     case 'getTodos':
@@ -390,10 +395,5 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
 }
 
 function getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
+    return generateNonce();
 }
