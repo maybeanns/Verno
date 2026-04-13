@@ -9,6 +9,7 @@ import { JiraAuthService } from '../jira/JiraAuthService';
 import { JiraSetupWebview } from '../jira/JiraSetupWebview';
 import { JiraSyncService } from '../jira/JiraSyncService';
 import { validateWebviewMessage, generateNonce } from '../utils/webviewSecurity';
+import { VernoArtifactService } from '../services/artifact/VernoArtifactService';
 
 /** Allowlist of message types accepted by the SDLC panel. */
 const SDLC_ALLOWED_TYPES = [
@@ -40,6 +41,7 @@ export class SDLCWebviewPanel {
     };
 
     private debateOrchestrator: DebateOrchestrator;
+    private artifacts: VernoArtifactService | null = null;
 
     private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext, logger: Logger, llmService: LLMService) {
         this.panel = panel;
@@ -47,6 +49,10 @@ export class SDLCWebviewPanel {
         this.logger = logger;
         this.llmService = llmService;
         this.debateOrchestrator = new DebateOrchestrator(llmService, logger);
+
+        // Initialize artifact service if workspace is open
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (root) { this.artifacts = new VernoArtifactService(root); }
 
         this.panel.onDidDispose(() => this.dispose());
         this.panel.webview.onDidReceiveMessage(async (message) => {
@@ -127,22 +133,21 @@ export class SDLCWebviewPanel {
     }
 
     private saveState() {
-        const root = this.getWorkspaceRoot();
-        if (!root) return;
-        const dir = path.join(root, '.verno');
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(path.join(dir, 'sdlc-state.json'), JSON.stringify(this.state, null, 2), 'utf-8');
+        if (!this.artifacts) {
+            const root = this.getWorkspaceRoot();
+            if (root) { this.artifacts = new VernoArtifactService(root); }
+        }
+        this.artifacts?.writeJSON('sdlc-state.json', this.state);
     }
 
     private loadState() {
         const root = this.getWorkspaceRoot();
-        if (!root) return;
-        const p = path.join(root, '.verno', 'sdlc-state.json');
-        if (fs.existsSync(p)) {
-            try {
-                this.state = JSON.parse(fs.readFileSync(p, 'utf-8'));
-                this.panel.webview.postMessage({ type: 'state-loaded', state: this.state });
-            } catch(e) {}
+        if (!root) { return; }
+        if (!this.artifacts) { this.artifacts = new VernoArtifactService(root); }
+        const saved = this.artifacts.readJSON<SDLCState>('sdlc-state.json');
+        if (saved) {
+            this.state = saved;
+            this.panel.webview.postMessage({ type: 'state-loaded', state: this.state });
         }
     }
 
@@ -204,9 +209,13 @@ Respond ONLY with valid JSON matching this structure:
 
         try {
             this.state.epics = JSON.parse(result);
-            const root = this.getWorkspaceRoot();
-            if (root) {
-                fs.writeFileSync(path.join(root, '.verno', 'tasks.md'), `<h1>Generated Tasks</h1><pre>${JSON.stringify(this.state.epics, null, 2)}</pre>`, 'utf-8');
+            if (!this.artifacts) {
+                const root = this.getWorkspaceRoot();
+                if (root) { this.artifacts = new VernoArtifactService(root); }
+            }
+            if (this.artifacts) {
+                this.artifacts.write('tasks.md', `<h1>Generated Tasks</h1><pre>${JSON.stringify(this.state.epics, null, 2)}</pre>`);
+                this.artifacts.writeJSON('tasks.json', this.state.epics);
             }
             this.saveState();
             this.panel.webview.postMessage({ type: 'tasks-ready', payload: this.state.epics });
