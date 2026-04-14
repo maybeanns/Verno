@@ -25,6 +25,14 @@ import { AudioSanitizer } from './services/audioSanitizer';
 import { SDLCWebviewPanel } from './panels/SDLCWebviewPanel';
 import { PRDDocument } from './types/sdlc';
 import { WorkspaceIntelligence } from './services/workspace/WorkspaceIntelligence';
+import { CoverageSidebarProvider } from './ui/panels/CoverageSidebarProvider';
+import { OtelInstrumentationService } from './services/project/OtelInstrumentationService';
+import { GrafanaDashboardService } from './services/project/GrafanaDashboardService';
+import { RunbookGeneratorService } from './services/project/RunbookGeneratorService';
+import { registerSecurityCommands } from './commands/security-commands';
+import { registerSecretScanCommands } from './commands/secret-scan-commands';
+import { ReadmeSyncService } from './services/documentation/ReadmeSyncService';
+import { registerDocumentationCommands } from './commands/DocumentationCommands';
 
 let logger: Logger;
 let configService: ConfigService;
@@ -147,6 +155,17 @@ export async function activate(context: vscode.ExtensionContext) {
 		);
 		logger.info('Enhanced Sidebar provider registered');
 
+		// Register Coverage Sidebar
+		const coverageSidebar = new CoverageSidebarProvider(workspaceRoot);
+		context.subscriptions.push(
+			vscode.window.registerWebviewViewProvider(
+				CoverageSidebarProvider.viewType,
+				coverageSidebar
+			)
+		);
+		logger.info('Coverage Sidebar provider registered');
+
+
 		// Register all agents
 		registerAllAgents();
 
@@ -154,6 +173,24 @@ export async function activate(context: vscode.ExtensionContext) {
 		StartRecordingCommand.register(context);
 		StopRecordingCommand.register(context);
 		ManageAgentsCommand.register(context);
+		registerSecurityCommands(context, logger);
+		
+		// Phase 10: Secret Scanner commands + status bar
+		registerSecretScanCommands(context, logger);
+
+		// Phase 11: Documentation commands (JSDoc + Changelog)
+		registerDocumentationCommands(context, llmService, logger);
+
+		// Phase 11: README Auto-Sync — offer to regenerate stale sections on file save
+		const readmeSyncService = new ReadmeSyncService(llmService, logger);
+		context.subscriptions.push(
+			vscode.workspace.onDidSaveTextDocument(async (document) => {
+				const workspaceFolders = vscode.workspace.workspaceFolders;
+				if (!workspaceFolders || workspaceFolders.length === 0) { return; }
+				const wsRoot = workspaceFolders[0].uri.fsPath;
+				await readmeSyncService.onFileSaved(document, wsRoot);
+			})
+		);
 
 		// Register main processing command (prompts in popup if no args)
 		const processCommand = vscode.commands.registerCommand('verno.processInput', async () => {
@@ -332,7 +369,35 @@ export async function activate(context: vscode.ExtensionContext) {
 			vscode.window.showInformationMessage(`Cleared keys for: ${selected.join(', ')}`);
 		});
 
-		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd, processVoiceCmd, newConversationCmd, startSDLCCmd, startBMADCmd, clearApiKeysCmd);
+		// Phase 9: Observability — generate OTel, Grafana, and Runbook artifacts
+		const generateObservabilityCmd = vscode.commands.registerCommand('verno.generateObservability', async () => {
+			if (!workspaceRoot) {
+				vscode.window.showErrorMessage('No workspace folder open');
+				return;
+			}
+			try {
+				const wsIntelLocal = new WorkspaceIntelligence(configService);
+				const snapshot = await wsIntelLocal.getSnapshot();
+
+				const otelService = new OtelInstrumentationService(workspaceRoot);
+				const grafanaService = new GrafanaDashboardService(workspaceRoot);
+				const runbookService = new RunbookGeneratorService(workspaceRoot, llmService);
+
+				const otelFiles = await otelService.generateInstrumentation(snapshot);
+				const grafanaFiles = await grafanaService.generateDashboard(snapshot);
+				const runbookFiles = await runbookService.generateRunbook(snapshot);
+
+				const allFiles = [...otelFiles, ...grafanaFiles, ...runbookFiles];
+				logger.info(`Observability artifacts generated: ${allFiles.join(', ')}`);
+				vscode.window.showInformationMessage(`Observability scaffolding complete: ${allFiles.length} files generated.`);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				logger.error('Observability generation failed', err as Error);
+				vscode.window.showErrorMessage(`Observability generation failed: ${msg}`);
+			}
+		});
+
+		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd, processVoiceCmd, newConversationCmd, startSDLCCmd, startBMADCmd, clearApiKeysCmd, generateObservabilityCmd);
 
 		logger.info('Verno extension activated successfully');
 		vscode.window.showInformationMessage('Verno extension is ready!');

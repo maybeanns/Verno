@@ -4,10 +4,10 @@
 Verno v1.0 — Full 9-Phase SDLC Engine
 
 ## Current Phase
-Phase 4 — Planning & Estimation (SDLC Phase 2)
+Phase 12 — Multi-Provider LLM & Streaming UI (next)
 
 ## Current Plan
-4-03 — Sprint Auto-Planner (complete)
+11-02 — Changelog Generator (complete)
 
 ## Status
 complete
@@ -41,7 +41,7 @@ Phase 1 plans already written (01-01, 01-02, 01-03). Ready to execute Phase 1 or
 | Self-healing code generation | Phase 6 (06-01) | Not started |
 | Sprint auto-planner | Phase 4 (04-03) | Not started |
 | GitHub integration | Phase 8 (08-01) | Not started |
-| Changelog + README auto-sync | Phase 11 (11-01, 11-02) | Not started |
+| Changelog + README auto-sync | Phase 11 (11-01, 11-02) | ✅ Complete |
 
 ## Handoff
 (none)

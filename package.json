@@ -57,6 +57,42 @@
       {
         "command": "verno.startSDLC",
         "title": "Verno: Start SDLC Pipeline"
+      },
+      {
+        "command": "verno.generateObservability",
+        "title": "Verno: Generate Observability Artifacts"
+      },
+      {
+        "command": "verno.generateOwaspChecklist",
+        "title": "Verno: Generate OWASP Checklist"
+      },
+      {
+        "command": "verno.checkCompliance",
+        "title": "Verno: Check PRD Compliance (GDPR/HIPAA)"
+      },
+      {
+        "command": "verno.scanForSecrets",
+        "title": "Verno: Scan for Secrets"
+      },
+      {
+        "command": "verno.installSecretScanner",
+        "title": "Verno: Install Pre-Commit Secret Scanner"
+      },
+      {
+        "command": "verno.uninstallSecretScanner",
+        "title": "Verno: Uninstall Secret Scanner Hook"
+      },
+      {
+        "command": "verno.generateJsDocs",
+        "title": "Verno: Generate JSDoc (BMAD Agents)"
+      },
+      {
+        "command": "verno.generateJsDocsFile",
+        "title": "Verno: Generate JSDoc for Current File"
+      },
+      {
+        "command": "verno.generateChangelog",
+        "title": "Verno: Generate Changelog from Git History"
       }
     ],
     "viewsContainers": {
@@ -79,6 +115,11 @@
         {
           "id": "verno-enhanced-sidebar",
           "name": "Verno Dashboard",
+          "type": "webview"
+        },
+        {
+          "id": "verno-coverage-sidebar",
+          "name": "Verno Coverage",
           "type": "webview"
         }
       ]
