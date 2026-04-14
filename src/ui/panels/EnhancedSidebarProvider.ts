@@ -5,11 +5,14 @@ import { FeedbackService } from '../../services/feedback';
 import { ConversationService } from '../../services/conversation';
 import * as path from 'path';
 import { validateWebviewMessage, generateNonce } from '../../utils/webviewSecurity';
+import { VernoArtifactService } from '../../services/artifact/VernoArtifactService';
+import { SprintPlan } from '../../types/sprint';
 
 /** Allowlist of message types accepted by the Enhanced Sidebar. */
 const ENHANCED_ALLOWED_TYPES = [
     'getTodos', 'getFeedback', 'getConversations',
-    'loadConversation', 'deleteConversation', 'updateTodoStatus'
+    'loadConversation', 'deleteConversation', 'updateTodoStatus',
+    'getSprintPlan'
 ] as const;
 
 export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
@@ -76,6 +79,9 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
                             this.sendTodosToWebview();
                         }
                         break;
+                    case 'getSprintPlan':
+                        this.sendSprintPlanToWebview();
+                        break;
                 }
             } catch (error) {
                 this.logger.error('Error handling message', error as Error);
@@ -87,6 +93,7 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
             this.sendTodosToWebview();
             this.sendConversationsToWebview();
             this.sendFeedbackToWebview();
+            this.sendSprintPlanToWebview();
         }, 500);
     }
 
@@ -128,6 +135,13 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
             type: 'conversationsUpdate',
             conversations
         });
+    }
+
+    private sendSprintPlanToWebview(): void {
+        if (!this._view) { return; }
+        const artifacts = new VernoArtifactService(this.workspaceRoot);
+        const plan = artifacts.readJSON<SprintPlan>('sprint-plan.json');
+        this._view.webview.postMessage({ type: 'sprintPlanUpdate', plan });
     }
 
     private getHtmlForWebview(webview: vscode.Webview): string {
@@ -259,6 +273,7 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
                 <div class="tab active" data-target="conversations">Conversations</div>
                 <div class="tab" data-target="feedback">Feedback</div>
                 <div class="tab" data-target="todos">Tasks</div>
+                <div class="tab" data-target="sprints">Sprints</div>
             </div>
 
             <!-- Conversations Panel -->
@@ -276,6 +291,11 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
                 <pre id="todo-content" style="font-family: var(--vscode-editor-font-family); font-size: 12px;">Loading...</pre>
             </div>
 
+            <!-- Sprints Panel -->
+            <div id="sprints" class="content">
+                <div id="sprint-list">Loading...</div>
+            </div>
+
             <script nonce="${nonce}">
                 const vscode = acquireVsCodeApi();
 
@@ -291,6 +311,31 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
                 });
 
                 // Renderers
+                function renderSprintPlan(plan) {
+                    const container = document.getElementById('sprint-list');
+                    if (!plan || !plan.sprints || plan.sprints.length === 0) {
+                        container.innerHTML = '<div style="padding: 20px; text-align: center; opacity: 0.6">No sprint plan yet. Generate one from the SDLC panel.</div>';
+                        return;
+                    }
+                    let html = '<div style="padding:8px 0; font-size:12px; opacity:0.7;">' + plan.sprints.length + ' sprints · ' + plan.totalStoryPoints + ' SP total · ' + plan.capacityPerSprint + ' SP/sprint</div>';
+                    plan.sprints.forEach(sprint => {
+                        const pct = plan.capacityPerSprint > 0 ? Math.round((sprint.totalPoints / plan.capacityPerSprint) * 100) : 0;
+                        html += '<div class="card">';
+                        html += '<div class="card-header">' + sprint.name + '<span style="font-weight:normal;">' + sprint.totalPoints + '/' + plan.capacityPerSprint + ' SP</span></div>';
+                        html += '<div style="background:var(--vscode-progressBar-background,#0e70c0);height:4px;width:' + Math.min(pct,100) + '%;border-radius:2px;margin-bottom:8px;"></div>';
+                        sprint.stories.forEach(s => {
+                            const isCritical = plan.criticalPath.includes(s.id);
+                            const pts = s.storyPoints !== undefined ? s.storyPoints : '?';
+                            html += '<div style="display:flex;justify-content:space-between;font-size:12px;padding:3px 0;">';
+                            html += '<span>' + (isCritical ? '⚡ ' : '') + s.title + '</span>';
+                            html += '<span style="opacity:0.6;white-space:nowrap;margin-left:8px;">' + pts + ' SP</span>';
+                            html += '</div>';
+                        });
+                        html += '</div>';
+                    });
+                    container.innerHTML = html;
+                }
+
                 function renderConversations(list) {
                     const container = document.getElementById('conv-list');
                     if (!list || list.length === 0) {
@@ -371,6 +416,9 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
                 window.addEventListener('message', event => {
                     const msg = event.data;
                     switch(msg.type) {
+                        case 'sprintPlanUpdate':
+                            renderSprintPlan(msg.plan);
+                            break;
                         case 'conversationsUpdate':
                             renderConversations(msg.conversations);
                             break;
@@ -387,6 +435,7 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
                 vscode.postMessage({ type: 'getConversations' });
                 vscode.postMessage({ type: 'getFeedback' });
                 vscode.postMessage({ type: 'getTodos' });
+                vscode.postMessage({ type: 'getSprintPlan' });
 
             </script>
         </body>

@@ -245,7 +245,7 @@ Plans:
 | 1. Security & Extension Foundation | 0/3 | Not started | - |
 | 2. Conversational Mode Upgrade | 0/2 | Not started | - |
 | 3. PRD Hardening (SDLC Ph.1) | 0/3 | Not started | - |
-| 4. Planning & Estimation (SDLC Ph.2) | 0/3 | Not started | - |
+| 4. Planning & Estimation (SDLC Ph.2) | 1/3 | In Progress | - |
 | 5. Architecture & Design (SDLC Ph.3) | 0/3 | Not started | - |
 | 6. Self-Healing Code Gen (SDLC Ph.4) | 0/3 | Not started | - |
 | 7. Testing & QA (SDLC Ph.5) | 0/3 | Not started | - |
