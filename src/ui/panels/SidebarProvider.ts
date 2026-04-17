@@ -6,6 +6,7 @@ import { LLMService } from '../../services/llm';
 import { WindowsVoiceRecorder } from '../../services/voice/WindowsVoiceRecorder';
 import { AudioSanitizer } from '../../services/audioSanitizer';
 import { validateWebviewMessage, generateNonce } from '../../utils/webviewSecurity';
+import * as fs from 'fs';
 
 /** Allowlist of message types this sidebar accepts from its webview. */
 const SIDEBAR_ALLOWED_TYPES = [
@@ -24,6 +25,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private onResolve?: (view: vscode.WebviewView) => void;
     private sessionVoiceKey: string | undefined;
     private isVoiceSessionActive: boolean = false;
+    private coverageWatcher: vscode.FileSystemWatcher | null = null;
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -57,7 +59,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             this.logger.info(`Message received: ${data.type}`);
             switch (data.type) {
                 case 'processInputSubmit':
-                    await vscode.commands.executeCommand('verno.processInputWithData', data.apiKey, data.input, data.mode, data.model);
+                    await vscode.commands.executeCommand('verno.processInputWithData', data.apiKey, data.input, data.mode, data.provider, data.model);
                     break;
                 case 'start-sdlc':
                     await vscode.commands.executeCommand('verno.startSDLC', data.input);
@@ -176,7 +178,38 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         // Remove the fragile setTimeout
         // if (this.isVoiceSessionActive) { ... }
 
+        // Start watching for coverage updates
+        this.setupCoverageWatcher(webviewView);
+
         this.onResolve?.(webviewView);
+    }
+
+    private setupCoverageWatcher(webviewView: vscode.WebviewView) {
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (!root) return;
+
+        const coveragePath = path.join(root, 'coverage', 'coverage-summary.json');
+        
+        const pushCoverage = () => {
+            if (fs.existsSync(coveragePath)) {
+                try {
+                    const data = JSON.parse(fs.readFileSync(coveragePath, 'utf8'));
+                    let pct = 0;
+                    if (data && data.total && data.total.lines && typeof data.total.lines.pct === 'number') {
+                        pct = data.total.lines.pct;
+                    }
+                    webviewView.webview.postMessage({ type: 'coverageUpdate', percentage: pct });
+                } catch(e) { /* ignore parse errors */ }
+            }
+        };
+
+        const pattern = new vscode.RelativePattern(root, 'coverage/coverage-summary.json');
+        this.coverageWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+        this.coverageWatcher.onDidChange(pushCoverage);
+        this.coverageWatcher.onDidCreate(pushCoverage);
+
+        // Push initial
+        pushCoverage();
     }
 
     private async getLLMProvider(): Promise<import('../../types').ILLMProvider | undefined> {
@@ -214,22 +247,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         // PREFER GROQ WHISPER IF AVAILABLE
         let groqKey = (await this.context.secrets.get('groqApiKey')) || this.sessionVoiceKey;
 
-        if (!groqKey && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-            try {
-                const fs = require('fs');
-                const path = require('path');
-                const envPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, '.env');
-                if (fs.existsSync(envPath)) {
-                    const envContent = fs.readFileSync(envPath).toString();
-                    const match = envContent.match(/^(?:VERNO_)?GROQ_API_KEY=(.*)$/m);
-                    if (match && match[1]) {
-                        groqKey = match[1].trim();
-                        this.logger.info('[Sidebar] Found Groq API Key in .env file');
-                        this.sessionVoiceKey = groqKey;
-                    }
-                }
-            } catch (envErr) {
-                this.logger.warn(`[Sidebar] Error reading .env file: ${(envErr as Error).message}`);
+        if (!groqKey) {
+            groqKey = process.env.GROQ_API_KEY;
+            if (groqKey) {
+                this.sessionVoiceKey = groqKey;
             }
         }
 

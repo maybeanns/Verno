@@ -4,6 +4,8 @@ import { LLMService } from '../../services/llm';
 import { FileService } from '../../services/file/FileService';
 import { FileChangeTracker } from '../../services/file/FileChangeTracker';
 import { FeedbackService } from '../../services/feedback';
+import { AmbiguityDetectorService } from '../../services/project/AmbiguityDetectorService';
+import { PrdVersioningService } from '../../services/project/PrdVersioningService';
 
 /**
  * Product Manager Agent (John) - PRD & Product Planning
@@ -13,6 +15,8 @@ export class ProductManagerAgent extends BaseAgent {
   name = 'pm';
   description = 'Product Manager - Product strategy, roadmap, prioritization, stakeholder management';
   private feedbackService?: FeedbackService;
+  private ambiguityDetector: AmbiguityDetectorService;
+  private versioningService: PrdVersioningService;
 
   constructor(
     protected logger: any,
@@ -21,6 +25,8 @@ export class ProductManagerAgent extends BaseAgent {
     private changeTracker: FileChangeTracker
   ) {
     super(logger);
+    this.ambiguityDetector = new AmbiguityDetectorService(this.llmService);
+    this.versioningService = new PrdVersioningService();
   }
 
   async execute(context: IAgentContext): Promise<string> {
@@ -46,18 +52,25 @@ Format output as markdown.`;
       buffer += token;
     });
 
+    // Run ambiguity detection to harden PRD
+    this.log('Hardening PRD through ambiguity detection...');
+    const hardenedBuffer = await this.ambiguityDetector.detectAndFlag(buffer, true);
+
     // Write PRD to file
     if (context.workspaceRoot) {
       const prdPath = `${context.workspaceRoot}/PRD.md`;
       try {
-        await this.fileService.createFile(prdPath, buffer);
-        this.changeTracker.recordChange(prdPath, buffer);
+        // Version existing PRD
+        this.versioningService.archiveCurrentVersion(context.workspaceRoot, 'PRD.md');
+        
+        await this.fileService.createFile(prdPath, hardenedBuffer);
+        this.changeTracker.recordChange(prdPath, hardenedBuffer);
         this.log(`PRD saved to ${prdPath}`);
       } catch (err) {
         this.log(`Failed to write PRD: ${err}`, 'error');
       }
     }
 
-    return buffer;
+    return hardenedBuffer;
   }
 }

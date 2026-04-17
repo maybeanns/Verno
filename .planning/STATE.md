@@ -4,10 +4,10 @@
 Verno v1.0 — Full 9-Phase SDLC Engine
 
 ## Current Phase
-Phase 12 — Multi-Provider LLM & Streaming UI (next)
+Phase 14 — Polish, Documentation & VSIX Package (complete)
 
 ## Current Plan
-11-02 — Changelog Generator (complete)
+14-02 — Final Docs + VSIX Package (complete)
 
 ## Status
 complete

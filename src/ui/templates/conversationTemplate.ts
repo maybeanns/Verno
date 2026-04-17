@@ -16,7 +16,11 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}' blob:; connect-src vscode-webview-resource: https:; worker-src blob:; media-src vscode-webview-resource: https: blob: mediastream:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net blob:; connect-src vscode-webview-resource: https:; worker-src blob:; media-src vscode-webview-resource: https: blob: mediastream:; font-src https://cdn.jsdelivr.net;">
+    <!-- Marked and Highlight.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
     <style>
         :root {
             --bg: var(--vscode-sideBar-background);
@@ -242,6 +246,11 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         .voice-fallback input:focus { outline: 1px solid #00ff88; border-color: #00ff88; }
         .voice-fallback button { padding: 8px 14px; background: linear-gradient(135deg, #00ff88, #00c8ff); border: none; border-radius: 8px; color: #000; font-size: 11px; font-weight: 700; cursor: pointer; }
         .voice-fallback button { padding: 8px 14px; background: linear-gradient(135deg, #00ff88, #00c8ff); border: none; border-radius: 8px; color: #000; font-size: 11px; font-weight: 700; cursor: pointer; }
+        /* MODE TOGGLE */
+        .mode-toggle { display: flex; background: var(--input-bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; height: 24px; font-size: 11px; font-weight: 600; margin-right: 8px; }
+        .mode-opt { padding: 0 10px; display: flex; align-items: center; cursor: pointer; opacity: 0.6; transition: all 0.2s; }
+        .mode-opt:hover { opacity: 0.8; }
+        .mode-opt.active { opacity: 1; background: var(--link); color: white; }
     </style>
     ${vadPaths ? `<script nonce="${nonce}" src="${vadPaths.bundlePath}"></script>` : ''}
 </head>
@@ -414,8 +423,26 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         <textarea id="msgInput" placeholder="Type a message..." rows="1"></textarea>
         <div class="toolbar">
             <div class="left-ctrl">
-                <select id="modeSelect" class="tsel" style="min-width:60px;font-weight:600;"><option value="plan">Plan</option><option value="code">Code</option><option value="ask">Ask</option></select>
-                <select id="modelSelect" class="tsel" style="min-width:90px;"><option value="gemini">Gemini Pro</option><option value="groq">Groq</option></select>
+                <div class="mode-toggle" id="modeToggle">
+                    <div class="mode-opt" data-val="conversational">Conversational</div>
+                    <div class="mode-opt" data-val="development">Development</div>
+                </div>
+                <select id="modelSelect" class="tsel" style="min-width:140px;">
+                    <optgroup label="Anthropic">
+                        <option value="anthropic:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                        <option value="anthropic:claude-3-haiku-20240307">Claude 3 Haiku</option>
+                    </optgroup>
+                    <optgroup label="OpenAI">
+                        <option value="openai:gpt-4o">GPT-4o</option>
+                        <option value="openai:gpt-4o-mini">GPT-4o Mini</option>
+                    </optgroup>
+                    <optgroup label="Google">
+                        <option value="gemini:gemini-pro">Gemini Pro</option>
+                    </optgroup>
+                    <optgroup label="Groq">
+                        <option value="groq:llama-3">Llama 3</option>
+                    </optgroup>
+                </select>
             </div>
             <div class="right-ctrl">
                 <button class="sdlc-btn" id="sdlcBtn" title="Start SDLC Flow (PRD & Jira)">Start SDLC</button>
@@ -767,22 +794,52 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         if(openLogBtn) openLogBtn.addEventListener('click',function(){vscode.postMessage({type:'showOutput'});});
 
         // === MODE / MODEL ===
-        if(modeSelect) modeSelect.addEventListener('change',function(){S.mode=modeSelect.value;save();updatePlaceholder(S.mode);});
-        if(modelSelect) modelSelect.addEventListener('change',function(){S.model=modelSelect.value;save();checkApiKey();});
-        function updatePlaceholder(m){if(!msgInput)return;if(m==='plan')msgInput.placeholder='What should we build today?';else if(m==='code')msgInput.placeholder='Describe code changes...';else if(m==='ask')msgInput.placeholder='Ask a question...';else msgInput.placeholder='Type a message...';}
+        var modeToggle=document.getElementById('modeToggle');
+        var modeOpts=document.querySelectorAll('.mode-opt');
+        if(modeToggle) {
+            if(S.mode === 'plan' || S.mode === 'code' || S.mode === 'development') {
+                S.mode = 'development';
+            } else {
+                S.mode = 'conversational';
+            }
+            modeOpts.forEach(function(o){
+                if(o.getAttribute('data-val') === S.mode) o.classList.add('active');
+                else o.classList.remove('active');
+            });
+            modeOpts.forEach(function(opt) {
+                opt.addEventListener('click', function() {
+                    modeOpts.forEach(function(o){ o.classList.remove('active'); });
+                    opt.classList.add('active');
+                    S.mode = opt.getAttribute('data-val');
+                    save();
+                    updatePlaceholder(S.mode);
+                });
+            });
+        }
+        if(modelSelect) {
+            modelSelect.value = (S.provider && S.model) ? (S.provider + ':' + S.model) : 'gemini:gemini-pro';
+            modelSelect.addEventListener('change',function(){
+                var parts = modelSelect.value.split(':');
+                S.provider = parts[0];
+                S.model = parts[1];
+                save();checkApiKey();
+            });
+        }
+        function updatePlaceholder(m){if(!msgInput)return;if(m==='development')msgInput.placeholder='Describe code changes...';else if(m==='conversational')msgInput.placeholder='Ask a question...';else msgInput.placeholder='Type a message...';}
         function checkApiKey(){
-            var key=getProviderKey(S.model);
-            if(!key&&apiKeyPrompt){apiKeyPrompt.style.display='block';var nd=document.getElementById('modelNameDisp');if(nd)nd.textContent=S.model;}
+            var key=getProviderKey(S.provider || S.model);
+            if(!key&&apiKeyPrompt){apiKeyPrompt.style.display='block';var nd=document.getElementById('modelNameDisp');if(nd)nd.textContent=(S.provider||S.model);}
             else if(apiKeyPrompt){apiKeyPrompt.style.display='none';}
         }
-        function getProviderKey(modelId){
-            var p=S.providers.find(function(x){return x.id===modelId;});
+        function getProviderKey(provId){
+            var p=S.providers.find(function(x){return x.id===provId;});
             return p?p.key:'';
         }
         if(apiKeyInp) apiKeyInp.addEventListener('keydown',function(e){
             if(e.key==='Enter'){var k=apiKeyInp.value.trim();if(k){
-                S.providers=S.providers.filter(function(p){return p.id!==S.model;});
-                S.providers.push({id:S.model,name:S.model,key:k});
+                var prov = S.provider || S.model;
+                S.providers=S.providers.filter(function(p){return p.id!==prov;});
+                S.providers.push({id:prov,name:prov,key:k});
                 save();apiKeyInp.value='';checkApiKey();
             }}
         });
@@ -798,12 +855,13 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         function sendMessage(){
             if(!msgInput)return;
             var text=msgInput.value.trim(); if(!text)return;
-            var apiKey=getProviderKey(S.model);
+            var apiKey=getProviderKey(S.provider || S.model);
             if(!apiKey){if(apiKeyPrompt)apiKeyPrompt.style.display='block';if(apiKeyInp)apiKeyInp.focus();addMsg('system','Please add an API key first (use Profile button).');return;}
             addMsg('user',text); msgInput.value=''; msgInput.style.height='auto';
             if(thinking)thinking.style.display='block';
             if(conv)conv.scrollTop=conv.scrollHeight;
-            vscode.postMessage({type:'processInputSubmit',input:text,apiKey:apiKey,mode:S.mode,model:S.model});
+            var outMode = (S.mode === 'conversational' || S.mode === 'ask') ? 'ask' : 'code';
+            vscode.postMessage({type:'processInputSubmit',input:text,apiKey:apiKey,mode:outMode,provider:S.provider,model:S.model});
         }
 
         // === MESSAGES ===
@@ -833,7 +891,70 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
                         }
                     }
                     break;
-                case 'newMessage': if(m.message)addMsg(m.message.role,m.message.content); if(thinking)thinking.style.display='none'; setTimeout(function(){if(ctxBar)ctxBar.classList.remove('show');},2000); break;
+                case 'chatToken':
+                    if(thinking)thinking.style.display='none';
+                    if(!window.currentAsstMsg) {
+                        var d=document.createElement('div');d.className='message assistant';
+                        var b=document.createElement('div');b.className='message-bubble markdown-body';
+                        window.currentAsstMsg = b; window.currentAsstText = '';
+                        d.appendChild(b);conv.insertBefore(d,thinking);
+                    }
+                    window.currentAsstText += m.token;
+                    if(typeof marked !== 'undefined') {
+                        window.currentAsstMsg.innerHTML = marked.parse(window.currentAsstText);
+                        if(typeof hljs !== 'undefined') {
+                            window.currentAsstMsg.querySelectorAll('pre code').forEach((block) => {
+                                hljs.highlightElement(block);
+                            });
+                        }
+                    } else {
+                        window.currentAsstMsg.textContent = window.currentAsstText;
+                    }
+                    conv.scrollTop=conv.scrollHeight;
+                    break;
+                case 'newMessage': 
+                    var wasStreaming = !!window.currentAsstMsg;
+                    window.currentAsstMsg = null;
+                    if(m.message) {
+                        if (m.message.role === 'user') {
+                           addMsg(m.message.role, m.message.content);
+                           var b=document.createElement('div');b.className='message-bubble markdown-body';
+                        } else {
+                           // If we were streaming, replace the last assistant bubble content. Otherwise add new.
+                           if (wasStreaming && typeof marked !== 'undefined') {
+                               var asstNodes = conv.querySelectorAll('.message.assistant');
+                               if (asstNodes.length > 0) {
+                                   var lastNode = asstNodes[asstNodes.length - 1];
+                                   var b = lastNode.querySelector('.message-bubble');
+                                   if (b) {
+                                       b.innerHTML = marked.parse(m.message.content);
+                                       if(typeof hljs !== 'undefined') {
+                                           b.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
+                                       }
+                                       conv.scrollTop=conv.scrollHeight;
+                                       break;
+                                   }
+                               }
+                           }
+                           
+                           var d=document.createElement('div');d.className='message '+m.message.role;
+                           var b=document.createElement('div');b.className='message-bubble markdown-body';
+                           if(typeof marked !== 'undefined') {
+                               b.innerHTML = marked.parse(m.message.content);
+                               if(typeof hljs !== 'undefined') {
+                                   b.querySelectorAll('pre code').forEach((block) => {
+                                       hljs.highlightElement(block);
+                                   });
+                               }
+                           } else {
+                               b.textContent = m.message.content;
+                           }
+                           d.appendChild(b);conv.insertBefore(d,thinking);conv.scrollTop=conv.scrollHeight;
+                        }
+                    } 
+                    if(thinking)thinking.style.display='none'; 
+                    setTimeout(function(){if(ctxBar)ctxBar.classList.remove('show');},2000); 
+                    break;
                 case 'thinking': if(thinking)thinking.style.display=m.show?'block':'none'; break;
                 case 'contextUsage': if(ctxBar&&ctxFill&&ctxStats){ctxBar.classList.add('show');var pct=Math.min((m.used/m.total)*100,100);ctxFill.style.width=pct+'%';var fk=function(n){return n>=1000?(n/1000).toFixed(1)+'k':''+n;};ctxStats.textContent=fk(m.used)+'/'+fk(m.total);} break;
                 case 'conversationList': renderConvList(m.conversations); break;

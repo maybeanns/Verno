@@ -130,6 +130,16 @@ export class AgentPanel {
   }
 
   /**
+   * Send a streaming token to the conversation
+   */
+  addToken(token: string) {
+    this.postMessage({
+      type: 'chatToken',
+      token
+    });
+  }
+
+  /**
    * Show thinking indicator
    */
   showThinking(show: boolean) {

@@ -220,8 +220,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 13-01: MockLLMService + Agent Unit Tests — injectable mock, critical agent tests
-- [ ] 13-02: Verno CI Pipeline — GitHub Actions for extension lint + compile + test
+- [x] 13-01: MockLLMService + Agent Unit Tests — injectable mock, critical agent tests
+- [x] 13-02: Verno CI Pipeline — GitHub Actions for extension lint + compile + test
 
 ### Phase 14: Polish, Documentation & VSIX Package
 **Goal**: Onboarding wizard, comprehensive docs, final VSIX package for FYP evaluation.
@@ -235,8 +235,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 14-01: UX Polish + Onboarding Wizard — mode toggle, welcome page, keyboard shortcuts
-- [ ] 14-02: Final Docs + VSIX Package — README, CONTRIBUTING, vsce package 1.0.0
+- [x] 14-01: UX Polish + Onboarding Wizard — mode toggle, welcome page, keyboard shortcuts
+- [x] 14-02: Final Docs + VSIX Package — README, CONTRIBUTING, vsce package 1.0.0
 
 ## Progress
 
@@ -254,5 +254,5 @@ Plans:
 | 10. Security & Compliance (SDLC Ph.8) | 2/2 | Completed | 2026-04-15 |
 | 11. Documentation & KB (SDLC Ph.9) | 2/2 | Completed | 2026-04-15 |
 | 12. Multi-Provider LLM & Streaming UI | 0/3 | Not started | - |
-| 13. Agent Test Coverage & Verno CI | 0/2 | Not started | - |
-| 14. Polish, Docs & VSIX Package | 0/2 | Not started | - |
+| 13. Agent Test Coverage & Verno CI | 2/2 | Completed | 2026-04-15 |
+| 14. Polish, Docs & VSIX Package | 2/2 | Completed | 2026-04-15 |

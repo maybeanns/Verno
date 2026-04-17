@@ -1,0 +1,17 @@
+{
+    "src/agents/core/OrchestratorAgent.ts": {
+        "covered": 450,
+        "total": 798,
+        "pct": 56
+    },
+    "src/services/llm/MockLLMService.ts": {
+        "covered": 120,
+        "total": 129,
+        "pct": 93
+    },
+    "src/agents/specialized/TestGeneratorAgent.ts": {
+        "covered": 85,
+        "total": 102,
+        "pct": 83
+    }
+}

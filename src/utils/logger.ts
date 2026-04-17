@@ -48,9 +48,13 @@ export class Logger {
     error(message: string, error?: Error): void {
         this.log(message, 'ERROR');
         if (error?.stack) {
-            this.outputChannel.appendLine(`    Stack: ${error.stack.split('\n').join('\n    ')}`);
+            const stack = `    Stack: ${error.stack.split('\n').join('\n    ')}`;
+            this.outputChannel.appendLine(stack);
+            console.error(stack);
         } else if (error?.message) {
-            this.outputChannel.appendLine(`    Error: ${error.message}`);
+            const errMsg = `    Error: ${error.message}`;
+            this.outputChannel.appendLine(errMsg);
+            console.error(errMsg);
         }
     }
 
@@ -61,7 +65,16 @@ export class Logger {
     private log(message: string, level: LogLevel): void {
         if (LOG_LEVEL_RANK[level] < LOG_LEVEL_RANK[this.minLevel]) { return; }
         const timestamp = new Date().toISOString();
-        this.outputChannel.appendLine(`[${timestamp}] [${level.padEnd(5)}] ${message}`);
+        const formattedMessage = `[${timestamp}] [${level.padEnd(5)}] ${message}`;
+        this.outputChannel.appendLine(formattedMessage);
+        
+        if (level === 'ERROR') {
+            console.error(formattedMessage);
+        } else if (level === 'WARN') {
+            console.warn(formattedMessage);
+        } else {
+            console.log(formattedMessage);
+        }
     }
 
     show(): void {

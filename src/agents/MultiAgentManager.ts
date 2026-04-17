@@ -6,6 +6,7 @@ import { LLMService } from '../services/llm';
 import { FileService } from '../services/file/FileService';
 import { ProgressIndicator } from '../services/progress';
 import { IAgentContext } from '../types';
+import { CoverageParserService } from '../services/testing/CoverageParserService';
 
 export class MultiAgentManager {
   public progressIndicator: ProgressIndicator;
@@ -64,6 +65,15 @@ export class MultiAgentManager {
 
         // Complete progress for this stage
         this.progressIndicator.completeStage();
+
+        // Special Phase 7 Coverage hook
+        if (stage === 'qa' && context.workspaceRoot) {
+            const coverageParser = new CoverageParserService();
+            const pct = coverageParser.getCoveragePercentage(context.workspaceRoot);
+            this.logger.info(`[MultiAgentManager] Test coverage detected: ${pct}`);
+            // Send this to webview via VSCode (assume it works via metadata or context)
+            outputs['coverage'] = pct;
+        }
 
         // Persist raw LLM output for debugging/devs
         try {

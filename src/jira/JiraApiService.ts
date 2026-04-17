@@ -131,4 +131,10 @@ export class JiraApiService {
     public async getIssue(key: string): Promise<any> {
         return this.request<any>('GET', `/rest/api/3/issue/${key}`);
     }
+
+    /** Generic POST for non-standard paths (e.g., Jira Agile API). */
+    public async post(path: string, payload: any): Promise<any> {
+        return this.request<any>('POST', path, payload);
+    }
 }
+

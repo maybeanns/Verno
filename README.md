@@ -1,212 +1,299 @@
-# Verno - AI-Powered Multi-Agent VSCode Extension
+# Verno — AI-Powered SDLC Automation Engine for VS Code
 
-Verno is an advanced VSCode extension that brings intelligent multi-agent AI capabilities to your development workflow. With automatic code quality validation, comprehensive feedback systems, and real-time progress tracking, Verno transforms how you build software.
+> **Voice-first, multi-agent AI assistant that automates the full Software Development Life Cycle inside VS Code.**
 
-## 🚀 Key Features
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](./package.json)
+[![VS Code](https://img.shields.io/badge/VS%20Code-%3E%3D1.80.0-007ACC.svg)](https://code.visualstudio.com/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![CI](https://github.com/maybeanns/Verno/actions/workflows/ci.yml/badge.svg)](https://github.com/maybeanns/Verno/actions)
 
-### Multi-Agent Orchestration System
-- **Planning Agent**: Structured project planning with comprehensive documentation
-- **BMAD Agents**: Business Analysis, Architecture, UX Design, Development, Product Management, QA, Technical Writing
-- **Orchestrator**: Automatic workflow coordination and task distribution
-- **Context-Aware**: Smart detection of new vs existing projects
+---
 
-### SDLC Automation & Jira Integration 🏗️
-- **AI Persona Debate**: 4 distinct AI agents (PM, Architect, Frontend, QA) debate your feature request over 3 rounds.
-- **Auto-PRD Generation**: Synthesizes the debate into a structured Product Requirements Document (PRD).
-- **Jira Sync Engine**: Decomposes the approved PRD into Epics, Stories, and Subtasks, automatically pushing them to your connected Atlassian Jira project.
-- **Resilient Webviews**: Rich, persistent UI panels for SDLC wizardry and Jira setup, featuring dry-run capabilities and crash-safe state recovery.
+## Architecture
 
-### Automatic Code Quality Validation ✨
-The **DeveloperAgent** now includes a comprehensive 4-step quality pipeline that runs automatically after code generation:
+```mermaid
+graph TB
+    subgraph User Interface
+        SB[Sidebar Panel]
+        VP[Voice / Text Input]
+        SDLC[SDLC Wizard Panel]
+    end
 
-1. **Dependency Installation** - Runs `npm install` automatically
-2. **TypeScript Compilation** - Validates with `tsc --noEmit`
-3. **Test Execution** - Runs `npm test` to ensure functionality
-4. **Code Linting** - Checks code quality with `npm run lint`
+    subgraph Router
+        RT{Router}
+    end
 
-All results are captured in detailed feedback reports with severity levels and actionable suggestions.
+    subgraph Conversational Mode
+        CE[ConversationEngine]
+        WI[WorkspaceIntelligence]
+    end
 
-### Task Management & Progress Tracking
-- **Auto-Generated TODOs**: Context-aware task creation based on project analysis
-- **Real-Time Progress**: Visual progress tracking in VSCode status bar
-- **Dependency Management**: Automatic task dependency chains
-- **Priority Levels**: High, medium, low priority task categorization
+    subgraph SDLC Pipeline Mode
+        DO[DebateOrchestrator]
+        OA[OrchestratorAgent]
+    end
 
-### Agent Feedback System
-- **Issue Tracking**: Critical, high, medium, low severity issue classification
-- **Completed Tasks**: Comprehensive task completion logs
-- **Suggestions**: Actionable recommendations for improvements
-- **Next Steps**: Clear guidance on what to do next
+    subgraph BMAD Agents
+        AN[Analyst - Mary]
+        AR[Architect - Winston]
+        UX[UX Designer - Sally]
+        PM[Product Manager]
+        DEV[Developer - Amelia]
+        CR[Code Reviewer]
+        QA[QA Engineer]
+        TW[Tech Writer]
+    end
 
-### Conversation Management
-- **Persistent History**: All planning and development conversations saved
-- **Multiple Modes**: Planning, development, and chat conversation types
-- **Export/Import**: Share conversations across team members
-- **Agent Attribution**: Track which agent provided which insights
+    subgraph AI Persona Debate
+        PMD[PM Persona]
+        ARD[Architect Persona]
+        FED[Frontend Persona]
+        QAD[QA Persona]
+        BED[Backend Persona]
+        DEVX[DevOps Persona]
+        SEC[Security Persona]
+    end
 
-### Project Analysis
-- **Language Detection**: Automatic identification of main programming language
-- **Framework Detection**: Recognizes React, Vue, Next.js, Express, and more
-- **Smart Scaffolding**: Different approaches for new vs existing projects
-- **Dependency Tracking**: Analyzes and validates project dependencies
+    subgraph LLM Service
+        LS[LLMService]
+        GEM[Gemini Provider]
+        GRQ[Groq Provider]
+        ANT[Anthropic Provider]
+        OAI[OpenAI Provider]
+        MOCK[MockLLMProvider]
+    end
 
-## 📊 UI Components
+    subgraph Cross-Cutting Services
+        FS[FileService]
+        VS[VectorStore + RAG]
+        FB[FeedbackService]
+        PS[PlanStateService]
+        CS[ConversationService]
+        TTS[TTS - Kokoro]
+        STT[STT - Whisper]
+    end
 
-### Enhanced Sidebar
-Browse through three powerful tabs:
-- **TODOs**: View all agent tasks with status, priorities, and dependencies
-- **Feedback**: See aggregated feedback from all agents with severity indicators
-- **Conversations**: Access planning and development conversation history
+    VP --> RT
+    SB --> RT
+    SDLC --> DO
 
-### Activity Bar Progress
-Real-time execution status displayed in your VSCode status bar:
-- `$(pulse) Verno Ready` - Idle state
-- `$(sync~spin) DeveloperAgent: 45%` - Running with progress
-- `$(check) Verno Complete` - Successfully completed
-- `$(error) Verno Error` - Error occurred
+    RT -->|chat| CE
+    RT -->|plan/code| OA
 
-## 🛠️ Commands
+    CE --> WI
+    CE --> LS
 
-- `Verno: Process User Input` - Start a new agent workflow
-- `Verno: Start Recording` - Begin voice recording
-- `Verno: Stop Recording` - End voice recording
-- `Verno: Manage Agents` - Configure agent settings
+    DO --> PMD & ARD & FED & QAD & BED & DEVX & SEC
+    DO -->|PRD| OA
 
-## 📁 Project Structure
+    OA --> AN & AR & UX & PM & DEV & CR & QA & TW
+    OA --> PS
 
-Verno creates a `.verno/` directory in your workspace:
+    DEV --> LS
+    DEV --> FS
+    AN & AR & UX & PM & QA & TW --> LS
+
+    LS --> GEM & GRQ & ANT & OAI & MOCK
+```
+
+---
+
+## 9-Phase SDLC Pipeline
+
+Verno maps the complete Software Development Life Cycle to autonomous AI agents:
+
+| # | SDLC Phase | Verno Agent / Service | Key Output |
+|---|------------|----------------------|------------|
+| 1 | **Requirements** | DebateOrchestrator → PRD Generator | `PRD.md` with OWASP checklist, GDPR/HIPAA flags |
+| 2 | **Planning & Estimation** | PlanningAgent + EstimationAgent | Sprint plan, Fibonacci estimates, dependency graph |
+| 3 | **Architecture & Design** | ArchitectAgent + UXDesignerAgent | `ARCHITECTURE.md`, tech stack, UX wireframes |
+| 4 | **Implementation** | DeveloperAgent (self-healing) | Generated code with compile→fix→retry loop |
+| 5 | **Testing & QA** | QAEngineerAgent + TestGeneratorAgent | Test suites, coverage reports |
+| 6 | **CI/CD & Deployment** | GitHub Integration Service | Actions workflows, Dockerfiles, K8s manifests |
+| 7 | **Monitoring** | OTel + Grafana + Runbook Services | OpenTelemetry hooks, dashboard JSON, ops runbook |
+| 8 | **Security** | OWASP Generator + Secret Scanner | Compliance checklists, pre-commit hook |
+| 9 | **Documentation** | ReadmeSyncService + ChangelogGenerator | Auto-synced README, CHANGELOG.md, JSDoc |
+
+---
+
+## Key Features
+
+### 🎙️ Voice-First Interface
+- **Kokoro TTS** — AI speaks responses aloud with configurable voice and speed
+- **Whisper STT** — Hybrid local/cloud transcription with audio sanitization
+- **Audio Router** — Auto-selects fastest transcription path
+
+### 🤖 AI Persona Debates
+- **7 AI personas** (PM, Architect, Frontend, QA, Backend, DevOps, Security) debate your idea over 3 rounds
+- **Security Persona** catches OWASP and compliance issues at requirements stage
+- Synthesis produces a structured **Product Requirements Document (PRD)**
+
+### 🔄 Self-Healing Code Generation
+- DeveloperAgent generates code, then runs a 4-step quality pipeline:
+  1. `npm install` → 2. `tsc --noEmit` → 3. `npm test` → 4. `npm run lint`
+- On failure, errors feed back to the LLM for automatic fix (up to 3 retries)
+- ConflictResolverAgent merges competing agent edits via semantic merge
+
+### 💬 Streaming Markdown Chat
+- Real-time token streaming with `marked.js` + `highlight.js`
+- Syntax-highlighted code blocks, lists, bold, and inline code
+- Provider/model selection dropdown with `localStorage` persistence
+
+### 🏗️ CI/CD Scaffold Generation
+- Detects repo stack and generates GitHub Actions workflow
+- Produces `Dockerfile`, `docker-compose.yml`, and Kubernetes manifests
+- Sprint auto-planner distributes tasks by team capacity
+
+### 📊 Monitoring & Observability
+- Generates OpenTelemetry instrumentation hooks per service
+- Produces Grafana dashboard JSON with pre-wired panels
+- Auto-generates operational runbooks from architecture context
+
+### 🔒 Security & Compliance
+- OWASP Top 10 checklist generated per PRD feature
+- GDPR/HIPAA auto-flagging for sections with PII or health data
+- Pre-commit secret scanner with git hook injection
+
+### 📝 Documentation Automation
+- **README Auto-Sync** — detects stale sections on file save, offers to regenerate
+- **Changelog Generator** — parses Conventional Commits into `CHANGELOG.md`
+- **JSDoc Generator** — auto-documents exported functions in BMAD-generated files
+
+### 🧪 Test Infrastructure
+- `MockLLMProvider` for deterministic agent testing without API calls
+- Unit tests for DeveloperAgent, OrchestratorAgent, ConversationEngine
+- GitHub Actions CI: lint → compile → test on every push
+
+---
+
+## Installation
+
+### From VSIX (Recommended for FYP Evaluation)
+```bash
+code --install-extension verno-1.0.0.vsix
+```
+
+### From Source
+```bash
+git clone https://github.com/maybeanns/Verno.git
+cd Verno
+npm ci
+npm run compile
+# Press F5 in VS Code to launch Extension Development Host
+```
+
+---
+
+## Configuration
+
+All settings are under the `verno.*` namespace in VS Code Settings:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `verno.defaultProvider` | `gemini` | LLM provider: `gemini`, `groq`, `anthropic`, `openai` |
+| `verno.ttsEnabled` | `true` | Enable spoken responses |
+| `verno.ttsVoice` | `af_heart` | Kokoro voice model |
+| `verno.ttsSpeed` | `1.1` | TTS playback speed multiplier |
+| `verno.whisperMode` | `hybrid` | `hybrid`, `local-only`, `cloud-only` |
+| `verno.localWhisperModel` | `base` | Local Whisper model: `tiny`, `base`, `small`, `medium`, `large-v3` |
+
+API keys are stored securely via **VS Code SecretStorage** — never in plaintext settings.
+
+---
+
+## Commands
+
+| Command | Shortcut | Description |
+|---------|----------|-------------|
+| `Verno: Process User Input` | `Ctrl+Shift+;` | Open text input prompt |
+| `Verno: Start Recording` | `Ctrl+Shift+R` | Begin voice recording |
+| `Verno: Start SDLC Pipeline` | `Ctrl+Shift+L` | Launch debate → PRD → code pipeline |
+| `Verno: Toggle Chat / SDLC Mode` | `Ctrl+Shift+M` | Switch between modes |
+| `Verno: Show Verno Output` | — | View extension logs |
+| `Verno: New Conversation` | — | Clear conversation history |
+| `Verno: Clear Stored API Keys` | — | Manage provider API keys |
+| `Verno: Generate Code` | — | Direct code generation |
+| `Verno: Show Diff` | — | View generated changes |
+| `Verno: Manage Agents` | — | Configure agent settings |
+| `Verno: Generate Observability Artifacts` | — | OTel + Grafana + Runbook |
+| `Verno: Generate OWASP Checklist` | — | Security compliance per PRD |
+| `Verno: Check PRD Compliance` | — | GDPR/HIPAA flagging |
+| `Verno: Scan for Secrets` | — | Manual secret scan |
+| `Verno: Install Pre-Commit Secret Scanner` | — | Git hook injection |
+| `Verno: Generate JSDoc` | — | Document BMAD agent exports |
+| `Verno: Generate Changelog` | — | CHANGELOG.md from git history |
+
+---
+
+## Project Structure
 
 ```
 workspace/
 └── .verno/
-    ├── conversations/          # Conversation history
-    ├── todos/                  # TODO lists by agent
-    ├── feedback/               # Agent feedback reports
-    ├── PRD.md                 # Product Requirements Document (SDLC phase)
-    ├── tasks.md               # Generated Epics and Stories
-    ├── sdlc-state.json        # SDLC session state recovery
-    ├── jira-config.json       # Jira project configuration
-    ├── PROJECT_PLAN.md        # Planning output
-    ├── ANALYSIS.md            # Business analysis
-    ├── ARCHITECTURE.md        # System architecture
-    └── QA_PLAN.md             # Test plans
+    ├── conversations/       # Conversation history
+    ├── todos/               # TODO lists by agent
+    ├── feedback/            # Agent feedback reports
+    ├── plan-state/          # Persisted plan state + history
+    ├── PRD.md               # Product Requirements Document
+    ├── ARCHITECTURE.md      # System architecture
+    ├── IMPLEMENTATION.md    # Generated code reference
+    ├── QA_PLAN.md           # Test plans
+    └── CHANGELOG.md         # Auto-generated changelog
 ```
 
-## 🔧 Requirements
+---
 
-- VS Code 1.80.0 or higher
-- Node.js 18 or higher
-- API key for your chosen LLM provider (Gemini, Groq, OpenAI, or Anthropic)
+## Requirements
 
-## 🚦 Getting Started
+- **VS Code** 1.80.0 or higher
+- **Node.js** 18 or higher
+- **API key** for at least one LLM provider (Gemini, Groq, Anthropic, or OpenAI)
 
-1. **Install the extension** from the VSCode marketplace
-2. **Open the sidebar** and click the Verno icon
-3. **Add your API key** for your LLM provider
-4. **Start coding!** Use voice or text to interact with agents
+---
 
-### Example Workflow
+## Release Notes
 
-1. **SDLC Phase (Ideation & Tasks)**: "Build a new e-commerce app"
-   - SDLC Webview intercepts project requests.
-   - DebateOrchestrator runs 3-round AI debate and generates `PRD.md`.
-   - User approves PRD and tasks are decomposed into Jira Epics & Stories.
-   - Tasks are synced to Jira.
+### 1.0.0 — Full SDLC Automation Engine
 
-2. **Planning**: Orchestrator kicks in with the approved PRD
-   - PlanningAgent generates comprehensive project plan
-   - Orchestrator creates TODO list with dependencies
-   
-3. **Development**: Orchestrator executes BMAD pipeline
-   - AnalystAgent performs business analysis
-   - ArchitectAgent designs system architecture
-   - UXDesignerAgent creates UX specifications
-   - DeveloperAgent generates code **and validates quality**
-   - QAEngineerAgent creates test plans
-   - TechWriterAgent generates documentation
+**14-phase milestone delivering a complete AI-powered development lifecycle:**
 
-3. **Quality Check**: DeveloperAgent automatically:
-   - Installs dependencies
-   - Compiles TypeScript
-   - Runs tests
-   - Checks linting
-   - **Generates feedback report**
+- ✅ Secure credential storage via VS Code SecretStorage
+- ✅ SDLC-aware conversational engine with workspace intelligence
+- ✅ 7-agent AI debate system with Security persona
+- ✅ Hardened PRD generation with ambiguity detection and versioning
+- ✅ Sprint auto-planner with Fibonacci estimation and dependency graphs
+- ✅ Architecture + UX design generation
+- ✅ Self-healing code generation with compile→fix→retry loop
+- ✅ Test generation with coverage tracking
+- ✅ CI/CD scaffold (GitHub Actions, Docker, K8s)
+- ✅ OpenTelemetry + Grafana + Runbook generation
+- ✅ OWASP compliance + GDPR/HIPAA flagging
+- ✅ Pre-commit secret scanner
+- ✅ README auto-sync + Changelog + JSDoc generation
+- ✅ Multi-provider LLM streaming with markdown rendering
+- ✅ Agent unit tests with MockLLMProvider + GitHub Actions CI
+- ✅ Onboarding wizard, keyboard shortcuts, mode toggle
+- ✅ Final VSIX package for distribution
 
-4. **Review**: Check the feedback tab for issues and suggestions
-
-## 📚 Documentation
-
-For comprehensive documentation, see:
-- [`docs/FEATURES.md`](./docs/FEATURES.md) - Detailed feature documentation
-- API reference for all services
-- Best practices and usage examples
-- Troubleshooting guide
-
-## 🎯 Quality Features
-
-### Feedback-Enabled Agents
-All BMAD agents now provide:
-- ✅ Completed task lists
-- ⚠️ Issues encountered (with severity)
-- 💡 Improvement suggestions
-- 📋 Recommended next steps
-
-### Automatic Validation
-DeveloperAgent ensures code quality by:
-- Running all tests before marking complete
-- Validating TypeScript compilation
-- Checking code style with linters
-- Documenting all issues found
-
-## 🔄 Extension Settings
-
-Configure Verno through VS Code settings:
-- **LLM Provider**: Choose between Gemini, Groq, OpenAI, Anthropic
-- **API Keys**: Configure your provider API keys
-- **Agent Behavior**: Customize agent capabilities
-- **Voice Settings**: Configure recording preferences
-
-## 📝 Release Notes
-
-### 0.2.0 (Latest)
-
-**Major Quality Enhancements:**
-- ✅ Automatic code quality validation in DeveloperAgent
-- ✅ Comprehensive feedback system across all BMAD agents
-- ✅ Real-time progress tracking in activity bar
-- ✅ Auto-generated TODO lists with smart task assignment
-- ✅ Enhanced sidebar with tabs for TODOs, Feedback, Conversations
-- ✅ Project analysis for context-aware development
-- ✅ Unit test infrastructure created
-
-**New Services:**
-- TodoService - Task management
-- FeedbackService - Agent feedback collection
-- ProgressIndicator - Real-time progress tracking
-- ConversationService - Conversation persistence
-- ProjectAnalyzer - Project structure analysis
-
-**Enhanced Agents:**
-- DeveloperAgent: Now includes 4-step quality pipeline
-- AnalystAgent: Feedback-enabled with issue tracking
-- ArchitectAgent: Tracks architecture decisions
-- QAEngineerAgent: Quality assurance with feedback
-- OrchestratorAgent: Auto-generates context-aware TODOs
+### 0.2.0
+- Automatic code quality validation in DeveloperAgent
+- Feedback system across all BMAD agents
+- Real-time progress tracking
+- Enhanced sidebar with TODOs, Feedback, Conversations
 
 ### 0.0.1
-
-Initial release with core voice recording and agent orchestration capabilities.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please see the project repository for guidelines.
-
-## 📄 License
-
-See LICENSE file for details.
+- Initial release with voice recording and agent orchestration
 
 ---
 
-**Transform your development workflow with Verno - where AI agents work together to build better software, faster.**
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, testing, and PR guidelines.
+
+## License
+
+See [LICENSE](./LICENSE) file for details.
+
+---
+
+**Verno — where AI agents work together to build better software, faster.** 🚀

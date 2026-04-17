@@ -63,6 +63,19 @@ export class DeveloperAgent extends BaseAgent {
     const issues: Array<{ severity: IssueSeverity; description: string; context: string }> = [];
     const suggestions: string[] = [];
 
+    const MAX_RETRIES = 3;
+    let finalBuffer = '';
+    
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      this.log(`Self-healing loop attempt ${attempt}/${MAX_RETRIES}`);
+      
+      // Clear per-attempt tracking arrays if it's a retry
+      if (attempt > 1) {
+        completedTasks.length = 0;
+        issues.length = 0;
+        suggestions.length = 0;
+      }
+
     // Get previous outputs from context
     const previousOutputs = (context.metadata?.previousOutputs || {}) as Record<string, string>;
     const analysis = previousOutputs['analyst'] || '';
@@ -115,77 +128,119 @@ export class DeveloperAgent extends BaseAgent {
       );
     }
 
-    let buffer = '';
-    try {
-      await this.llmService.streamGenerate(prompt, undefined, (token: string) => {
-        buffer += token;
-      });
-      completedTasks.push('Generated code from LLM');
-    } catch (error) {
-      issues.push({
-        severity: 'critical',
-        description: 'Code generation failed',
-        context: `Error: ${error}`
-      });
-      this.generateFeedback(completedTasks, issues, suggestions, context.workspaceRoot);
-      return buffer;
+    // If it's a retry, append the negative context (errors or conflicts)
+    if (attempt > 1 && issues.length > 0) {
+      const errorContext = issues.filter(i => i.severity === 'high' || i.severity === 'critical' || i.severity === 'medium')
+                                 .map(i => `- ${i.description}:\n${i.context}\n`)
+                                 .join('\n');
+      
+      prompt += `\n\nCRITICAL FIX REQUIRED:\nYour previous attempt generated the following errors or conflicts. Please fix them. Do not generate new unrelated functionality. Only output the fixed files.\nERRORS:\n${errorContext}`;
+      
+      // Also wipe memory issues immediately so they don't persist into the new attempt
+      issues.length = 0;
     }
 
-    // Parse and write generated code files
-    let generatedFiles: Array<{ name: string; content: string }> = [];
-    if (context.workspaceRoot) {
-      generatedFiles = this.parseCodeFiles(buffer);
-      this.log(`Parsed ${generatedFiles.length} code files from LLM output`);
-      completedTasks.push(`Parsed ${generatedFiles.length} files`);
-
-      for (const file of generatedFiles) {
-        try {
-          const filePath = `${context.workspaceRoot}/${file.name}`;
-          // Use updateFile for existing files, createFile for new ones
-          if (fs.existsSync(filePath)) {
-            await this.fileService.updateFile(filePath, file.content);
-            this.log(`Updated existing file: ${file.name}`);
-          } else {
-            await this.fileService.createFile(filePath, file.content);
-            this.log(`Created new file: ${file.name}`);
-          }
-          this.changeTracker.recordChange(filePath, file.content);
-          this.log(`Generated code file: ${file.name}`);
-          completedTasks.push(`Created ${file.name}`);
-        } catch (err) {
-          this.log(`Failed to write code file ${file.name}: ${err}`, 'error');
-          issues.push({
-            severity: 'high',
-            description: `Failed to write ${file.name}`,
-            context: `Error: ${err}`
-          });
+      let buffer = '';
+      try {
+        await this.llmService.streamGenerate(prompt, undefined, (token: string) => {
+          buffer += token;
+        });
+        completedTasks.push(`Generated code from LLM (Attempt ${attempt})`);
+        finalBuffer = buffer;
+      } catch (error) {
+        issues.push({
+          severity: 'critical',
+          description: 'Code generation failed',
+          context: `Error: ${error}`
+        });
+        if (attempt === MAX_RETRIES) {
+          this.generateFeedback(completedTasks, issues, suggestions, context.workspaceRoot);
+          return finalBuffer;
+        } else {
+          continue; // Retry
         }
       }
 
-      // Save full output as reference
-      const implPath = `${context.workspaceRoot}/IMPLEMENTATION.md`;
-      try {
-        await this.fileService.createFile(implPath, buffer);
-        this.changeTracker.recordChange(implPath, buffer);
-        this.log(`Implementation reference saved to ${implPath}`);
-        completedTasks.push('Saved implementation reference');
-      } catch (err) {
-        this.log(`Failed to write implementation reference: ${err}`, 'error');
-        issues.push({
-          severity: 'medium',
-          description: 'Failed to save implementation reference',
-          context: `Error: ${err}`
-        });
+      // Parse and write generated code files or diffs
+      let generatedFiles: Array<{ name: string; content: string; isDiff?: boolean }> = [];
+      if (context.workspaceRoot) {
+        generatedFiles = this.parseCodeFiles(buffer);
+        this.log(`Parsed ${generatedFiles.length} file instructions from LLM output`);
+        completedTasks.push(`Parsed ${generatedFiles.length} files`);
+
+        for (const file of generatedFiles) {
+          try {
+            const filePath = `${context.workspaceRoot}/${file.name}`;
+            
+            if (file.isDiff && fs.existsSync(filePath)) {
+               // COD-03: Incremental differ
+               try {
+                 this.log(`Applying incremental patch to: ${file.name}`);
+                 await (this.fileService as any).applyPatch(filePath, file.content);
+                 this.changeTracker.recordChange(filePath, 'Applied diff patch'); // Note: actual new content is retrieved later
+                 this.log(`Patched existing file: ${file.name}`);
+                 completedTasks.push(`Patched ${file.name}`);
+               } catch (diffErr: any) {
+                 this.log(`Failed to apply patch to ${file.name}: ${diffErr.message}`, 'error');
+                 issues.push({
+                   severity: 'high',
+                   description: `Patch application failed for ${file.name}`,
+                   context: `Could not safely merge the diff snippet. Ensure the 'old code' matches exactly. Error: ${diffErr.message}`
+                 });
+               }
+            } else {
+               // Use updateFile for existing full-file overrides, createFile for new
+               if (fs.existsSync(filePath)) {
+                 await this.fileService.updateFile(filePath, file.content, /* allowOverwrite */ true);
+                 this.log(`Updated existing file: ${file.name}`);
+               } else {
+                 await this.fileService.createFile(filePath, file.content);
+                 this.log(`Created new file: ${file.name}`);
+               }
+               this.changeTracker.recordChange(filePath, file.content);
+               this.log(`Generated code file: ${file.name}`);
+               completedTasks.push(`Created/Updated ${file.name}`);
+            }
+          } catch (err: any) {
+            this.log(`Failed to write code file ${file.name}: ${err}`, 'error');
+            issues.push({
+              severity: 'high',
+              description: `Failed to write ${file.name}`,
+              context: `Error: ${err.message}`
+            });
+          }
+        }
+
+        // Save full output as reference
+        const implPath = `${context.workspaceRoot}/.verno/IMPLEMENTATION.md`;
+        try {
+          await this.fileService.updateFile(implPath, buffer, true);
+          this.changeTracker.recordChange(implPath, buffer);
+          this.log(`Implementation reference saved to ${implPath}`);
+          completedTasks.push('Saved implementation reference');
+        } catch (err: any) {
+          // fallback create
+          (this.fileService as any).createFile(implPath, buffer).catch(() => {});
+        }
+
+        // Run quality checks
+        await this.runQualityChecks(context.workspaceRoot, completedTasks, issues, suggestions);
       }
 
-      // Run quality checks
-      await this.runQualityChecks(context.workspaceRoot, completedTasks, issues, suggestions);
-    }
+      // COD-01: Detect fatals for self-healing logic
+      const fatals = issues.filter(i => i.severity === 'high' || i.severity === 'critical');
+      if (fatals.length === 0) {
+        this.log('Generation successful, no fatal issues.');
+        break; // break the retry cycle
+      } else {
+        this.log(`Self-healing detected ${fatals.length} fatal errors. Retrying...`, 'warn');
+      }
+    } // end MAX_RETRIES loop
 
-    // Generate feedback
+    // Generate feedback based on the ultimate state
     this.generateFeedback(completedTasks, issues, suggestions, context.workspaceRoot);
 
-    return buffer;
+    return finalBuffer;
   }
 
   /**
@@ -351,17 +406,28 @@ export class DeveloperAgent extends BaseAgent {
     );
   }
 
-  private parseCodeFiles(content: string): Array<{ name: string; content: string }> {
-    const files: Array<{ name: string; content: string }> = [];
+  private parseCodeFiles(content: string): Array<{ name: string; content: string; isDiff?: boolean }> {
+    const files: Array<{ name: string; content: string; isDiff?: boolean }> = [];
+
+    // TIER 0: Parse Diffs (Incremental Change Blocks) first
+    // Pattern: ```diff FILE: relative/path.ts\n<<<<\nOLD\n====\nNEW\n>>>>\n```
+    const diffRegex = /```diff\s*\n(?:FILE|EDIT):\s*([^\n]+)\s*\n([\s\S]*?)```/g;
+    let match;
+    while ((match = diffRegex.exec(content)) !== null) {
+      const filename = match[1].trim();
+      const diffContent = match[2].trim();
+      if (filename && diffContent) {
+        files.push({ name: filename, content: diffContent, isDiff: true });
+      }
+    }
 
     // TIER 1: Try FILE:/EDIT: format first (preferred)
     // Pattern A: Inline format (```FILE: name\ncontent```)
     const inlineRegex = /```(?:FILE|EDIT):\s*([^\n]+)\n([\s\S]*?)```/g;
-    let match;
     while ((match = inlineRegex.exec(content)) !== null) {
       const filename = match[1].trim();
       const filecontent = match[2].trim();
-      if (filename && filecontent) {
+      if (filename && filecontent && !files.some(f => f.name === filename)) {
         files.push({ name: filename, content: filecontent });
       }
     }
@@ -593,17 +659,23 @@ RULES:
 - Show the FULL content of each modified file.
 ${detectedLang ? `- You MUST use ${detectedLang}. Do NOT use any other language.\n` : ''}
 OUTPUT FORMAT (MANDATORY):
-For modified files:
-\`\`\`EDIT: path/to/existing-file.ext
-...full modified content...
+For incrementally editing existing files, you MUST use the diff format to save time and tokens.
+\`\`\`diff
+FILE: path/to/existing-file.ext
+<<<<
+old exact lines snippet to replace
+====
+new lines snippet replacement
+>>>>
 \`\`\`
+(You can output multiple \`<<<< ... ==== ... >>>>\` blocks within the same diff if needed).
 
-For new files:
+For entirely new files:
 \`\`\`FILE: path/to/new-file.ext
-...code...
+...full code...
 \`\`\`
 
-You MUST output code using the format above. Do not describe what you would do. Write the actual code.`;
+You MUST output code using the formats above. Do not describe what you would do. Write the actual code.`;
   }
 
 

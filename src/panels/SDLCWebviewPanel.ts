@@ -59,7 +59,8 @@ export class SDLCWebviewPanel {
 
         this.panel.onDidDispose(() => this.dispose());
         this.panel.webview.onDidReceiveMessage(async (message) => {
-            if (!validateWebviewMessage(message, SDLC_ALLOWED_TYPES)) { return; }
+            this.logger.info(`[SDLCWebviewPanel] Received message: ${JSON.stringify(message)}`);
+            if (!validateWebviewMessage(message, SDLC_ALLOWED_TYPES, this.logger)) { return; }
             const msg = message as any; // type validated above
             switch(msg.type) {
                 case 'start-debate':
@@ -104,6 +105,7 @@ export class SDLCWebviewPanel {
     }
 
     public static createOrShow(context: vscode.ExtensionContext, logger: Logger, llmService: LLMService, topic?: string) {
+        logger.info('[SDLCWebviewPanel] createOrShow triggered, topic: ' + topic);
         if (SDLCWebviewPanel.currentPanel) {
             SDLCWebviewPanel.currentPanel.panel.reveal();
             if (topic) {
@@ -114,7 +116,7 @@ export class SDLCWebviewPanel {
 
         const panel = vscode.window.createWebviewPanel('sdlcFlow', 'Verno SDLC Orchestrator', vscode.ViewColumn.One, { enableScripts: true });
         SDLCWebviewPanel.currentPanel = new SDLCWebviewPanel(panel, context, logger, llmService);
-        SDLCWebviewPanel.currentPanel.panel.webview.html = SDLCWebviewPanel.currentPanel.getHtml();
+        SDLCWebviewPanel.currentPanel.panel.webview.html = SDLCWebviewPanel.currentPanel.getHtml(SDLCWebviewPanel.currentPanel.panel.webview);
         
         if (topic) {
             setTimeout(() => {
@@ -148,13 +150,14 @@ export class SDLCWebviewPanel {
 
     private loadState() {
         const root = this.getWorkspaceRoot();
-        if (!root) { return; }
-        if (!this.artifacts) { this.artifacts = new VernoArtifactService(root); }
-        const saved = this.artifacts.readJSON<SDLCState>('sdlc-state.json');
-        if (saved) {
-            this.state = saved;
-            this.panel.webview.postMessage({ type: 'state-loaded', state: this.state });
+        if (root) {
+            if (!this.artifacts) { this.artifacts = new VernoArtifactService(root); }
+            const saved = this.artifacts.readJSON<SDLCState>('sdlc-state.json');
+            if (saved) {
+                this.state = saved;
+            }
         }
+        this.panel.webview.postMessage({ type: 'state-loaded', state: this.state });
     }
 
     private async runDebateFlow(feedback?: string) {
@@ -285,13 +288,13 @@ Respond ONLY with valid JSON matching this structure:
         return generateNonce();
     }
 
-    private getHtml() {
+    private getHtml(webview: vscode.Webview) {
         const nonce = this.getNonce();
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}';">
     <style>
         body { font-family: var(--vscode-font-family); background: var(--vscode-editor-background); color: var(--vscode-foreground); padding: 20px; }
         .section { display: none; margin-bottom: 30px; }
@@ -370,14 +373,17 @@ Respond ONLY with valid JSON matching this structure:
     </div>
 
     <script nonce="${nonce}">
+        console.log('[SDLCWebviewPanel] Script Loaded');
         const vscode = acquireVsCodeApi();
         
         let state = null;
         let isJiraAuth = false;
 
+        console.log('[SDLCWebviewPanel] Posting load-state message');
         vscode.postMessage({ type: 'load-state' });
 
         window.addEventListener('message', e => {
+            console.log('[SDLCWebviewPanel] Webview received message:', e.data);
             const msg = e.data;
             if (msg.type === 'state-loaded') {
                 state = msg.state;

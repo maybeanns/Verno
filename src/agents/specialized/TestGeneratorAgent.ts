@@ -7,11 +7,14 @@ import { IAgentContext } from '../../types';
 import { ISpecializedAgent } from '../../types/agents';
 import { LLMService } from '../../services/llm';
 import { FileService } from '../../services/file/FileService';
+import { PlaywrightScaffoldService } from '../../services/project/PlaywrightScaffoldService';
 import * as path from 'path';
+import * as fs from 'fs';
 
 export class TestGeneratorAgent extends BaseAgent implements ISpecializedAgent {
   name = 'TestGeneratorAgent';
   description = 'Generates unit and integration tests for code';
+  private playwrightService: PlaywrightScaffoldService;
 
   constructor(
     protected logger: any,
@@ -19,10 +22,11 @@ export class TestGeneratorAgent extends BaseAgent implements ISpecializedAgent {
     private fileService: FileService
   ) {
     super(logger);
+    this.playwrightService = new PlaywrightScaffoldService(llmService, fileService);
   }
 
   validateInput(context: IAgentContext): boolean {
-    return this.validateContext(context) && (!!context.fileContent || !!context.metadata?.codeAnalysis);
+    return this.validateContext(context) && (!!context.filePath || !!context.metadata?.codeAnalysis);
   }
 
   async preProcess(context: IAgentContext): Promise<IAgentContext> {
@@ -38,24 +42,48 @@ export class TestGeneratorAgent extends BaseAgent implements ISpecializedAgent {
     this.log('Generating tests');
     
     try {
-      const codeAnalysis = context.metadata?.codeAnalysis as string;
       const workspaceRoot = context.workspaceRoot;
+      const activeFile = context.filePath;
+      const fileContent = context.fileContent || '';
 
-      // Generate unit tests
-      const unitTestPrompt = `Generate comprehensive unit tests for this specification: ${codeAnalysis}. Use Jest framework and return only the test code.`;
-      const unitTests = await this.llmService.generateText(unitTestPrompt);
-      
-      const unitTestPath = path.join(workspaceRoot, 'generated', 'index.test.ts');
-      await this.fileService.createFile(unitTestPath, unitTests);
-      this.log(`Unit tests created: ${unitTestPath}`);
+      // 1. Unit Test Generation (Logic-Aware)
+      if (activeFile && fileContent) {
+          const unitTestPrompt = `
+          Generate comprehensive, logic-aware unit tests for this TypeScript file using the Jest framework.
+          
+          File: ${activeFile}
+          Content:
+          ${fileContent}
+          
+          Guidelines:
+          - Analyze the internal logic and conditional branches of all functions.
+          - Generate assertions for happy paths, edge cases, and potential error states.
+          - Use appropriate mocks for external dependencies.
+          - Return ONLY the TypeScript code for the test.
+          `;
 
-      // Generate integration tests
-      const integrationTestPrompt = `Generate integration tests for this specification: ${codeAnalysis}. Return only the test code.`;
-      const integrationTests = await this.llmService.generateText(integrationTestPrompt);
-      
-      const integrationTestPath = path.join(workspaceRoot, 'generated', 'integration.test.ts');
-      await this.fileService.createFile(integrationTestPath, integrationTests);
-      this.log(`Integration tests created: ${integrationTestPath}`);
+          const unitTests = await this.llmService.generateText(unitTestPrompt);
+          
+          // Determine path: neighbor or __tests__
+          const fileDir = path.dirname(path.join(workspaceRoot, activeFile));
+          const fileName = path.basename(activeFile, path.extname(activeFile));
+          
+          let testDir = fileDir;
+          const localTestsDir = path.join(fileDir, '__tests__');
+          if (fs.existsSync(localTestsDir)) {
+              testDir = localTestsDir;
+          }
+
+          const unitTestPath = path.join(testDir, `${fileName}.test.ts`);
+          await this.fileService.createFile(unitTestPath, unitTests);
+          this.log(`Unit tests created: ${unitTestPath}`);
+      }
+
+      // 2. E2E Scaffolding (if requested or by default in this phase)
+      if (context.metadata?.generateE2E) {
+          this.log('Scaffolding Playwright E2E tests...');
+          await this.playwrightService.generateE2ETests(context);
+      }
 
       return await this.postProcess('Test generation complete');
     } catch (error) {
