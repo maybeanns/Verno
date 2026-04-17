@@ -6,16 +6,16 @@ Verno owns the full 9-phase Software Development Life Cycle — from debate-driv
 
 ## Phases
 
-- [ ] **Phase 1: Security & Extension Foundation** — SecretStorage, webview guards, metadata, provider cleanup
-- [ ] **Phase 2: Conversational Mode Upgrade** — SDLC-aware advisor with real-time workspace intelligence
-- [ ] **Phase 3: PRD Hardening (SDLC Phase 1)** — Security persona, ambiguity detector, version diffing, traceability matrix
-- [ ] **Phase 4: Planning & Estimation (SDLC Phase 2)** — Story point agent, sprint auto-planner, dependency graph
-- [ ] **Phase 5: Architecture & Design (SDLC Phase 3)** — ADRs, Mermaid diagrams, OpenAPI contracts
-- [ ] **Phase 6: Self-Healing Code Generation (SDLC Phase 4)** — Error retry loop, conflict resolver, incremental diffs
-- [ ] **Phase 7: Testing & QA (SDLC Phase 5)** — Unit test auto-gen, E2E scaffolding, coverage sidebar
-- [ ] **Phase 8: CI/CD & GitHub Integration (SDLC Phase 6)** — GitHub Actions, Dockerfile/K8s, repo detection, PR creation
-- [ ] **Phase 9: Monitoring & Observability (SDLC Phase 7)** — OpenTelemetry, Grafana dashboards, runbooks
-- [ ] **Phase 10: Security & Compliance (SDLC Phase 8)** — OWASP checklists, secret scanning, GDPR flags
+- [x] **Phase 1: Security & Extension Foundation** — SecretStorage, webview guards, metadata, provider cleanup
+- [x] **Phase 2: Conversational Mode Upgrade** — SDLC-aware advisor with real-time workspace intelligence
+- [x] **Phase 3: PRD Hardening (SDLC Phase 1)** — Security persona, ambiguity detector, version diffing, traceability matrix
+- [x] **Phase 4: Planning & Estimation (SDLC Phase 2)** — Story point agent, sprint auto-planner, dependency graph
+- [x] **Phase 5: Architecture & Design (SDLC Phase 3)** — ADRs, Mermaid diagrams, OpenAPI contracts
+- [x] **Phase 6: Self-Healing Code Generation (SDLC Phase 4)** — Error retry loop, conflict resolver, incremental diffs
+- [x] **Phase 7: Testing & QA (SDLC Phase 5)** — Unit test auto-gen, E2E scaffolding, coverage sidebar
+- [x] **Phase 8: CI/CD & GitHub Integration (SDLC Phase 6)** — GitHub Actions, Dockerfile/K8s, repo detection, PR creation
+- [x] **Phase 9: Monitoring & Observability (SDLC Phase 7)** — OpenTelemetry, Grafana dashboards, runbooks
+- [x] **Phase 10: Security & Compliance (SDLC Phase 8)** — OWASP checklists, secret scanning, GDPR flags
 - [ ] **Phase 11: Documentation & Knowledge Base (SDLC Phase 9)** — README sync, changelog gen, JSDoc
 - [ ] **Phase 12: Multi-Provider LLM & Streaming UI** — Anthropic + OpenAI providers, streaming markdown renderer
 - [ ] **Phase 13: Agent Test Coverage & CI for Verno** — MockLLMService, unit tests, GitHub Actions for extension itself
@@ -53,7 +53,7 @@ Plans:
 
 Plans:
 - [x] 02-01: SDLC-Aware ConversationEngine — workspace-context system prompt, mode detection
-- [ ] 02-02: Mode Toggle UI — sidebar toggle, context-aware response templates
+- [x] 02-02: Mode Toggle UI — sidebar toggle, context-aware response templates
 
 ### Phase 3: PRD Hardening (SDLC Phase 1)
 **Goal**: Make PRD generation industry-grade — with a security persona, ambiguity detection, version tracking, and a traceability matrix.
@@ -68,8 +68,8 @@ Plans:
 
 Plans:
 - [x] 03-01: Security Persona in Debate — 8th agent with OWASP/GDPR focus
-- [ ] 03-02: Ambiguity Detector + PRD Versioning — flag vague terms, persist revisions
-- [ ] 03-03: Requirements Traceability Matrix — link PRD sections to Epic IDs
+- [x] 03-02: Ambiguity Detector + PRD Versioning — flag vague terms, persist revisions
+- [x] 03-03: Requirements Traceability Matrix — link PRD sections to Epic IDs
 
 ### Phase 4: Planning & Estimation (SDLC Phase 2)
 **Goal**: Add story point estimation, sprint auto-planning, and dependency graph visualization to the Jira sync pipeline.
@@ -83,9 +83,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 04-01: EstimationAgent — Fibonacci story point sizing per Story
-- [ ] 04-02: Dependency Graph — block/depend relationship detection + sidebar visualization
-- [ ] 04-03: Sprint Auto-Planner — capacity-input sprint distribution + Jira sprint sync
+- [x] 04-01: EstimationAgent — Fibonacci story point sizing per Story
+- [x] 04-02: Dependency Graph — block/depend relationship detection + sidebar visualization
+- [x] 04-03: Sprint Auto-Planner — capacity-input sprint distribution + Jira sprint sync
 
 ### Phase 5: Architecture & Design (SDLC Phase 3)
 **Goal**: Extend ArchitectAgent to produce ADRs, Mermaid diagrams, and OpenAPI contracts alongside ARCHITECTURE.md.
@@ -98,9 +98,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 05-01: Architecture Decision Records (ADRs) — per-decision log with rationale
-- [ ] 05-02: Mermaid Diagram Generator — sequence, component, and ER diagrams
-- [ ] 05-03: OpenAPI Contract Designer — OpenAPI 3.1 spec from debate analysis
+- [x] 05-01: Architecture Decision Records (ADRs) — per-decision log with rationale
+- [x] 05-02: Mermaid Diagram Generator — sequence, component, and ER diagrams
+- [x] 05-03: OpenAPI Contract Designer — OpenAPI 3.1 spec from debate analysis
 
 ### Phase 6: Self-Healing Code Generation (SDLC Phase 4)
 **Goal**: Make code generation self-correcting — detect TypeScript/ESLint errors post-generation and re-run with error context until passing.
@@ -114,11 +114,11 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01: Self-Healing Loop — error-detect → re-generate cycle in DeveloperAgent
-- [ ] 06-02: Multi-Agent Conflict Resolver — same-file edit detection + merge agent
-- [ ] 06-03: Incremental Diff Generation — diff-aware prompt, regenerate changed sections only
+- [x] 06-01: Self-Healing Loop — error-detect → re-generate cycle in DeveloperAgent
+- [x] 06-02: Multi-Agent Conflict Resolver — same-file edit detection + merge agent
+- [x] 06-03: Incremental Diff Generation — diff-aware prompt, regenerate changed sections only
 
-### Phase 7: Testing & QA (SDLC Phase 5)
+### Phase 7: Testing & QA (SDLC Phase 5) [x]
 **Goal**: Auto-generate unit tests per generated file, scaffold Playwright E2E tests, and show live coverage in sidebar.
 **Depends on**: Phase 6
 **Requirements**: TST-01, TST-02, TST-03, TST-04
@@ -130,9 +130,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 07-01: Unit Test Auto-Generator — per-file test stubs via TestGeneratorAgent
-- [ ] 07-02: E2E Playwright Scaffolding — generate test files from PRD user flows
-- [ ] 07-03: Coverage Badge + MockLLMService — sidebar badge, agent unit tests
+- [x] 07-01: Unit Test Auto-Generator — per-file test stubs via TestGeneratorAgent
+- [x] 07-02: E2E Playwright Scaffolding — generate test files from PRD user flows
+- [x] 07-03: Coverage Badge + MockLLMService — sidebar badge, agent unit tests
 
 ### Phase 8: CI/CD & GitHub Integration (SDLC Phase 6)
 **Goal**: Detect the user's GitHub repo and auto-scaffold GitHub Actions workflows, Dockerfiles, and Kubernetes manifests.
@@ -147,11 +147,11 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 08-01: GitHub Repository Integration — repo detection, branch info, PR creation
-- [ ] 08-02: CI/CD Scaffold — GitHub Actions workflows per detected stack
-- [ ] 08-03: Container & K8s Manifests — Dockerfile, docker-compose, K8s YAML
+- [x] 08-01: GitHub Repository Integration — repo detection, branch info, PR creation
+- [x] 08-02: CI/CD Scaffold — GitHub Actions workflows per detected stack
+- [x] 08-03: Container & K8s Manifests — Dockerfile, docker-compose, K8s YAML
 
-### Phase 9: Monitoring & Observability (SDLC Phase 7)
+### Phase 9: Monitoring & Observability (SDLC Phase 7) [x]
 **Goal**: Generated code ships with generated observability — OpenTelemetry snippets, Grafana dashboards, and operational runbooks.
 **Depends on**: Phase 8
 **Requirements**: MON-01, MON-02, MON-03
@@ -162,8 +162,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 09-01: OpenTelemetry Instrumentation Generator — service-level OTel snippets
-- [ ] 09-02: Grafana Dashboard + Runbook Generator — dashboard JSON + ops runbook
+- [x] 09-01: OpenTelemetry Instrumentation Generator — service-level OTel snippets
+- [x] 09-02: Grafana Dashboard + Runbook Generator — dashboard JSON + ops runbook
 
 ### Phase 10: Security & Compliance (SDLC Phase 8)
 **Goal**: Shift security left — OWASP checklists in PRD, GDPR/HIPAA flags, secret scanning before commits.
@@ -176,8 +176,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 10-01: OWASP Checklist Generator + GDPR/HIPAA Flags — PRD compliance layer
-- [ ] 10-02: Pre-Commit Secret Scanner — git hook injection + Verno command
+- [x] 10-01: OWASP Checklist Generator + GDPR/HIPAA Flags — PRD compliance layer
+- [x] 10-02: Pre-Commit Secret Scanner — git hook injection + Verno command
 
 ### Phase 11: Documentation & Knowledge Base (SDLC Phase 9)
 **Goal**: Regenerate README sections when code changes, generate changelogs from Conventional Commits, auto-generate JSDoc from BMAD code.
@@ -190,8 +190,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 11-01: README Auto-Sync + JSDoc Generator — change-triggered doc regeneration
-- [ ] 11-02: Changelog Generator — Conventional Commits parser → CHANGELOG.md
+- [x] 11-01: README Auto-Sync + JSDoc Generator — change-triggered doc regeneration
+- [x] 11-02: Changelog Generator — Conventional Commits parser → CHANGELOG.md
 
 ### Phase 12: Multi-Provider LLM & Streaming UI
 **Goal**: Add Anthropic and OpenAI providers, add model selection dropdown, and render streaming markdown in chat.
@@ -220,8 +220,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 13-01: MockLLMService + Agent Unit Tests — injectable mock, critical agent tests
-- [ ] 13-02: Verno CI Pipeline — GitHub Actions for extension lint + compile + test
+- [x] 13-01: MockLLMService + Agent Unit Tests — injectable mock, critical agent tests
+- [x] 13-02: Verno CI Pipeline — GitHub Actions for extension lint + compile + test
 
 ### Phase 14: Polish, Documentation & VSIX Package
 **Goal**: Onboarding wizard, comprehensive docs, final VSIX package for FYP evaluation.
@@ -235,24 +235,24 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 14-01: UX Polish + Onboarding Wizard — mode toggle, welcome page, keyboard shortcuts
-- [ ] 14-02: Final Docs + VSIX Package — README, CONTRIBUTING, vsce package 1.0.0
+- [x] 14-01: UX Polish + Onboarding Wizard — mode toggle, welcome page, keyboard shortcuts
+- [x] 14-02: Final Docs + VSIX Package — README, CONTRIBUTING, vsce package 1.0.0
 
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Security & Extension Foundation | 0/3 | Not started | - |
-| 2. Conversational Mode Upgrade | 0/2 | Not started | - |
-| 3. PRD Hardening (SDLC Ph.1) | 0/3 | Not started | - |
-| 4. Planning & Estimation (SDLC Ph.2) | 0/3 | Not started | - |
-| 5. Architecture & Design (SDLC Ph.3) | 0/3 | Not started | - |
-| 6. Self-Healing Code Gen (SDLC Ph.4) | 0/3 | Not started | - |
-| 7. Testing & QA (SDLC Ph.5) | 0/3 | Not started | - |
-| 8. CI/CD & GitHub (SDLC Ph.6) | 0/3 | Not started | - |
+| 1. Security & Extension Foundation | 3/3 | Completed | 2026-04-15 |
+| 2. Conversational Mode Upgrade | 2/2 | Completed | 2026-04-15 |
+| 3. PRD Hardening (SDLC Ph.1) | 3/3 | Completed | 2026-04-15 |
+| 4. Planning & Estimation (SDLC Ph.2) | 3/3 | Completed | 2026-04-15 |
+| 5. Architecture & Design (SDLC Ph.3) | 3/3 | Completed | 2026-04-15 |
+| 6. Self-Healing Code Gen (SDLC Ph.4) | 3/3 | Completed | 2026-04-15 |
+| 7. Testing & QA (SDLC Ph.5) | 3/3 | Completed | 2026-04-15 |
+| 8. CI/CD & GitHub (SDLC Ph.6) | 3/3 | Completed | 2026-04-15 |
 | 9. Monitoring & Observability (SDLC Ph.7) | 0/2 | Not started | - |
-| 10. Security & Compliance (SDLC Ph.8) | 0/2 | Not started | - |
-| 11. Documentation & KB (SDLC Ph.9) | 0/2 | Not started | - |
+| 10. Security & Compliance (SDLC Ph.8) | 2/2 | Completed | 2026-04-15 |
+| 11. Documentation & KB (SDLC Ph.9) | 2/2 | Completed | 2026-04-15 |
 | 12. Multi-Provider LLM & Streaming UI | 0/3 | Not started | - |
-| 13. Agent Test Coverage & Verno CI | 0/2 | Not started | - |
-| 14. Polish, Docs & VSIX Package | 0/2 | Not started | - |
+| 13. Agent Test Coverage & Verno CI | 2/2 | Completed | 2026-04-15 |
+| 14. Polish, Docs & VSIX Package | 2/2 | Completed | 2026-04-15 |

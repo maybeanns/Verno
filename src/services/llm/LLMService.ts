@@ -118,6 +118,12 @@ export class LLMService {
    * Streaming generation API. If the provider supports streaming, use it.
    * Otherwise, fall back to a single-shot generateText and emit as one token.
    */
+  private globalTokenListener?: (token: string) => void;
+
+  setGlobalTokenListener(listener: (token: string) => void): void {
+    this.globalTokenListener = listener;
+  }
+
   async streamGenerate(
     prompt: string,
     options: Record<string, unknown> | undefined,
@@ -125,10 +131,17 @@ export class LLMService {
   ): Promise<void> {
     this.estimateUsage(prompt);
 
+    const hookedOnToken = (token: string) => {
+      onToken(token);
+      if (this.globalTokenListener) {
+        this.globalTokenListener(token);
+      }
+    };
+
     // If LangChain mode is enabled, use LangChain streaming
     if (this.useLangChain && this.langChainService) {
       const sessionId = options?.sessionId as string | undefined;
-      await this.langChainService.streamChat(prompt, sessionId, onToken);
+      await this.langChainService.streamChat(prompt, sessionId, hookedOnToken);
       return;
     }
 
@@ -139,13 +152,13 @@ export class LLMService {
 
     const providerAny: any = this.provider as any;
     if (typeof providerAny.streamGenerate === 'function') {
-      await providerAny.streamGenerate(prompt, options, onToken);
+      await providerAny.streamGenerate(prompt, options, hookedOnToken);
       return;
     }
 
     // Fallback: single-shot and emit whole text as one token
     const text = await this.generateText(prompt, options);
-    onToken(text);
+    hookedOnToken(text);
   }
 
   setProvider(provider: ILLMProvider): void {

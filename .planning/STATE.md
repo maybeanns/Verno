@@ -4,13 +4,13 @@
 Verno v1.0 — Full 9-Phase SDLC Engine
 
 ## Current Phase
-Phase 1 — Security & Extension Foundation
+Phase 14 — Polish, Documentation & VSIX Package (complete)
 
 ## Current Plan
-1-01 — Secure API Key Storage
+14-02 — Final Docs + VSIX Package (complete)
 
 ## Status
-planning
+complete
 
 ## Decisions
 | Date | Decision | Rationale |
@@ -41,7 +41,7 @@ Phase 1 plans already written (01-01, 01-02, 01-03). Ready to execute Phase 1 or
 | Self-healing code generation | Phase 6 (06-01) | Not started |
 | Sprint auto-planner | Phase 4 (04-03) | Not started |
 | GitHub integration | Phase 8 (08-01) | Not started |
-| Changelog + README auto-sync | Phase 11 (11-01, 11-02) | Not started |
+| Changelog + README auto-sync | Phase 11 (11-01, 11-02) | ✅ Complete |
 
 ## Handoff
 (none)

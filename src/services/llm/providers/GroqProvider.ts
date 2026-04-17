@@ -6,15 +6,14 @@ import { ILLMProvider } from '../../../types';
 import FormData from 'form-data';
 
 export class GroqProvider implements ILLMProvider {
-  private apiKey: string = '';
-  private model: string = 'allam-2-7b';
+  private apiKey: string = process.env.GROQ_API_KEY || '';
+  private model: string = 'llama-3.3-70b-versatile';
   private apiEndpoint: string = 'https://api.groq.com/openai/v1/chat/completions';
 
   async initialize(apiKey: string): Promise<void> {
-    if (!apiKey || apiKey.trim().length === 0) {
-      throw new Error('Groq API key cannot be empty');
+    if (apiKey && apiKey.trim().length > 0) {
+      this.apiKey = apiKey.trim();
     }
-    this.apiKey = apiKey.trim();
   }
 
   async generateText(prompt: string, options?: Record<string, unknown>): Promise<string> {

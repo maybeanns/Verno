@@ -21,28 +21,7 @@ import { DebateMessage, PRDDocument, PRDSection } from '../types/sdlc';
 import { LLMService } from '../services/llm';
 import { Logger } from '../utils/logger';
 import { VernoArtifactService } from '../services/artifact/VernoArtifactService';
-
-// ─── OWASP / Compliance constants ────────────────────────────────────────────
-
-const GDPR_KEYWORDS = [
-    'email', 'name', 'address', 'phone', 'user data', 'personal', 'profile',
-    'location', 'analytics', 'tracking', 'cookie', 'consent', 'identity', 'ip address'
-];
-
-const HIPAA_KEYWORDS = [
-    'health', 'medical', 'diagnosis', 'patient', 'prescription', 'clinical',
-    'symptom', 'doctor', 'hospital', 'lab result', 'ehr', 'phi', 'treatment'
-];
-
-// Top OWASP categories likely relevant to any software project
-const OWASP_BASELINE_CHECKLIST = [
-    'A01: Broken Access Control — verify role-based permissions on every endpoint',
-    'A02: Cryptographic Failures — ensure secrets, tokens, and PII are encrypted at rest and in transit',
-    'A03: Injection — sanitize all user inputs (SQL, command, LDAP, XPath)',
-    'A05: Security Misconfiguration — disable debug modes and default credentials in production',
-    'A07: Identification & Authentication Failures — enforce MFA and secure session management',
-    'A09: Security Logging & Monitoring Failures — log auth events and anomalies with alerting',
-];
+import { SecurityComplianceService } from '../services/project/SecurityComplianceService';
 
 // ─── Agent definitions ────────────────────────────────────────────────────────
 
@@ -65,10 +44,12 @@ const DEBATE_AGENTS = [
 export class DebateOrchestrator {
     private llmService: LLMService;
     private logger: Logger;
+    private securityService: SecurityComplianceService;
 
     constructor(llmService: LLMService, logger: Logger) {
         this.llmService = llmService;
         this.logger = logger;
+        this.securityService = new SecurityComplianceService();
     }
 
     // ── Public ──────────────────────────────────────────────────────────────
@@ -164,11 +145,8 @@ Required sections (in this order):
             }];
         }
 
-        // ── Phase D: GDPR/HIPAA compliance scan ───────────────────────────
-        sections = this.detectComplianceFlags(sections);
-
-        // Append OWASP baseline to Security section
-        sections = this.injectOwaspChecklist(sections);
+        // ── Phase D: Security & Compliance pass ───────────────────────────
+        sections = this.securityService.applySecurityPass(sections);
 
         const prdDocument: PRDDocument = {
             title: `PRD: ${topic.substring(0, 80)}`,
@@ -224,48 +202,6 @@ ${historyText}
 This is Round ${round}. ${baseInstruction}${securityAddendum}
 
 Keep your response under 150 words. Be direct, professional, and represent your role's priorities firmly.`;
-    }
-
-    /**
-     * Scan each PRD section for GDPR and HIPAA keyword signals.
-     * Attaches human-readable warning strings to `complianceFlags`.
-     */
-    private detectComplianceFlags(sections: PRDSection[]): PRDSection[] {
-        return sections.map(section => {
-            const lower = section.content.toLowerCase();
-            const flags: string[] = [...(section.complianceFlags ?? [])];
-
-            const hasGdpr = GDPR_KEYWORDS.some(k => lower.includes(k));
-            const hasHipaa = HIPAA_KEYWORDS.some(k => lower.includes(k));
-
-            if (hasGdpr) {
-                flags.push('⚠️ GDPR: Personal data detected — add explicit consent mechanism, data retention policy, and right-to-erasure support');
-            }
-            if (hasHipaa) {
-                flags.push('⚠️ HIPAA: Health data detected — encryption at rest (AES-256) and in transit (TLS 1.3), audit logging, and Business Associate Agreement required');
-            }
-
-            return { ...section, complianceFlags: flags };
-        });
-    }
-
-    /**
-     * Find the "Security & Compliance" section and append the OWASP baseline checklist
-     * if it isn't already present in the generated content.
-     */
-    private injectOwaspChecklist(sections: PRDSection[]): PRDSection[] {
-        return sections.map(section => {
-            if (section.title.toLowerCase().includes('security')) {
-                const hasOwasp = section.content.toLowerCase().includes('owasp') ||
-                                 section.content.toLowerCase().includes('a01');
-                if (!hasOwasp) {
-                    const checklist = '\n\n**OWASP Top 10 Baseline Checklist:**\n' +
-                        OWASP_BASELINE_CHECKLIST.map(item => `- ${item}`).join('\n');
-                    return { ...section, content: section.content + checklist };
-                }
-            }
-            return section;
-        });
     }
 
     /**

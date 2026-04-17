@@ -61,6 +61,30 @@ export class ConfigService implements IConfigService {
     return 'groq'; // Groq keys are opaque — default fallback
   }
 
+  /** Persist the user's selected provider identifier (e.g. 'anthropic', 'openai'). */
+  async storeSelectedProvider(provider: string): Promise<void> {
+    if (!this.secrets) { return; }
+    await this.secrets.store('verno_selected_provider', provider);
+  }
+
+  /** Retrieve the persisted provider identifier, or undefined if not set. */
+  async getSelectedProvider(): Promise<string | undefined> {
+    if (!this.secrets) { return undefined; }
+    return this.secrets.get('verno_selected_provider');
+  }
+
+  /** Persist the user's selected model name for a given provider. */
+  async storeSelectedModel(provider: string, model: string): Promise<void> {
+    if (!this.secrets) { return; }
+    await this.secrets.store(`verno_model_${provider}`, model);
+  }
+
+  /** Retrieve the persisted model name for a provider, or undefined if not set. */
+  async getSelectedModel(provider: string): Promise<string | undefined> {
+    if (!this.secrets) { return undefined; }
+    return this.secrets.get(`verno_model_${provider}`);
+  }
+
   // ─── Settings ────────────────────────────────────────────────────────────
 
   get<T>(key: string): T | undefined {

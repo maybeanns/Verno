@@ -10,11 +10,14 @@ import { JiraSetupWebview } from '../jira/JiraSetupWebview';
 import { JiraSyncService } from '../jira/JiraSyncService';
 import { validateWebviewMessage, generateNonce } from '../utils/webviewSecurity';
 import { VernoArtifactService } from '../services/artifact/VernoArtifactService';
+import { SprintPlannerAgent } from '../agents/BMAD/SprintPlannerAgent';
+import { SprintPlan } from '../types/sprint';
 
 /** Allowlist of message types accepted by the SDLC panel. */
 const SDLC_ALLOWED_TYPES = [
     'start-debate', 'approve-prd', 'revise-prd', 'push-jira',
-    'retry-item', 'complete-flow', 'load-state', 'open-jira-setup'
+    'retry-item', 'complete-flow', 'load-state', 'open-jira-setup',
+    'generateSprintPlan'
 ] as const;
 
 interface SDLCState {
@@ -56,7 +59,8 @@ export class SDLCWebviewPanel {
 
         this.panel.onDidDispose(() => this.dispose());
         this.panel.webview.onDidReceiveMessage(async (message) => {
-            if (!validateWebviewMessage(message, SDLC_ALLOWED_TYPES)) { return; }
+            this.logger.info(`[SDLCWebviewPanel] Received message: ${JSON.stringify(message)}`);
+            if (!validateWebviewMessage(message, SDLC_ALLOWED_TYPES, this.logger)) { return; }
             const msg = message as any; // type validated above
             switch(msg.type) {
                 case 'start-debate':
@@ -93,11 +97,15 @@ export class SDLCWebviewPanel {
                 case 'open-jira-setup':
                     JiraSetupWebview.createOrShow(this.context, this.logger);
                     break;
+                case 'generateSprintPlan':
+                    await this.generateSprintPlan(msg.capacity);
+                    break;
             }
         });
     }
 
     public static createOrShow(context: vscode.ExtensionContext, logger: Logger, llmService: LLMService, topic?: string) {
+        logger.info('[SDLCWebviewPanel] createOrShow triggered, topic: ' + topic);
         if (SDLCWebviewPanel.currentPanel) {
             SDLCWebviewPanel.currentPanel.panel.reveal();
             if (topic) {
@@ -108,7 +116,7 @@ export class SDLCWebviewPanel {
 
         const panel = vscode.window.createWebviewPanel('sdlcFlow', 'Verno SDLC Orchestrator', vscode.ViewColumn.One, { enableScripts: true });
         SDLCWebviewPanel.currentPanel = new SDLCWebviewPanel(panel, context, logger, llmService);
-        SDLCWebviewPanel.currentPanel.panel.webview.html = SDLCWebviewPanel.currentPanel.getHtml();
+        SDLCWebviewPanel.currentPanel.panel.webview.html = SDLCWebviewPanel.currentPanel.getHtml(SDLCWebviewPanel.currentPanel.panel.webview);
         
         if (topic) {
             setTimeout(() => {
@@ -142,13 +150,14 @@ export class SDLCWebviewPanel {
 
     private loadState() {
         const root = this.getWorkspaceRoot();
-        if (!root) { return; }
-        if (!this.artifacts) { this.artifacts = new VernoArtifactService(root); }
-        const saved = this.artifacts.readJSON<SDLCState>('sdlc-state.json');
-        if (saved) {
-            this.state = saved;
-            this.panel.webview.postMessage({ type: 'state-loaded', state: this.state });
+        if (root) {
+            if (!this.artifacts) { this.artifacts = new VernoArtifactService(root); }
+            const saved = this.artifacts.readJSON<SDLCState>('sdlc-state.json');
+            if (saved) {
+                this.state = saved;
+            }
         }
+        this.panel.webview.postMessage({ type: 'state-loaded', state: this.state });
     }
 
     private async runDebateFlow(feedback?: string) {
@@ -264,17 +273,28 @@ Respond ONLY with valid JSON matching this structure:
         this.saveState();
     }
 
+    private async generateSprintPlan(capacity: number): Promise<void> {
+        if (!this.state.epics || this.state.epics.length === 0) {
+            vscode.window.showErrorMessage('No epics available. Complete task breakdown first.');
+            return;
+        }
+        const agent = new SprintPlannerAgent(this.logger);
+        const plan: SprintPlan = agent.plan(this.state.epics, capacity);
+        this.panel.webview.postMessage({ type: 'sprintPlanReady', payload: plan });
+        this.logger.info(`[SDLCWebviewPanel] Sprint plan generated: ${plan.sprints.length} sprints`);
+    }
+
     private getNonce() {
         return generateNonce();
     }
 
-    private getHtml() {
+    private getHtml(webview: vscode.Webview) {
         const nonce = this.getNonce();
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}';">
     <style>
         body { font-family: var(--vscode-font-family); background: var(--vscode-editor-background); color: var(--vscode-foreground); padding: 20px; }
         .section { display: none; margin-bottom: 30px; }
@@ -334,6 +354,14 @@ Respond ONLY with valid JSON matching this structure:
         <h3>Task Breakdown</h3>
         <div id="epicsList"></div>
         
+        <!-- Sprint Planner -->
+        <div id="sprintPlannerSection" style="margin-top:20px; border-top:1px solid var(--vscode-panel-border); padding-top:20px; display:none;">
+            <h4>⚡ Sprint Planner</h4>
+            <label>Team Capacity: <input type="number" id="capacityInput" value="40" min="1" style="width:80px;"> story points per sprint</label>
+            <button id="generateSprintBtn" style="margin-left:10px;">Generate Sprint Plan</button>
+            <div id="sprintPlanOutput" style="margin-top:15px;"></div>
+        </div>
+
         <div id="jiraControls" style="margin-top:20px; border-top:1px solid var(--vscode-panel-border); padding-top:20px;">
             <div id="setupMsg">You need to connect Jira first. <button id="setupJiraBtn">Setup Jira</button></div>
             <div id="pushActions" style="display:none;">
@@ -345,14 +373,17 @@ Respond ONLY with valid JSON matching this structure:
     </div>
 
     <script nonce="${nonce}">
+        console.log('[SDLCWebviewPanel] Script Loaded');
         const vscode = acquireVsCodeApi();
         
         let state = null;
         let isJiraAuth = false;
 
+        console.log('[SDLCWebviewPanel] Posting load-state message');
         vscode.postMessage({ type: 'load-state' });
 
         window.addEventListener('message', e => {
+            console.log('[SDLCWebviewPanel] Webview received message:', e.data);
             const msg = e.data;
             if (msg.type === 'state-loaded') {
                 state = msg.state;
@@ -376,6 +407,7 @@ Respond ONLY with valid JSON matching this structure:
                 renderPRD(msg.payload);
             } else if (msg.type === 'tasks-ready') {
                 renderEpics(msg.payload);
+                document.getElementById('sprintPlannerSection').style.display = 'block';
             } else if (msg.type === 'jira-status') {
                 isJiraAuth = msg.isAuth;
                 if(isJiraAuth) {
@@ -388,6 +420,8 @@ Respond ONLY with valid JSON matching this structure:
                     p.className = 'pill ' + msg.payload.syncStatus;
                     p.innerText = msg.payload.syncStatus.toUpperCase();
                 }
+            } else if (msg.type === 'sprintPlanReady') {
+                renderSprintPlan(msg.payload);
             }
         });
 
@@ -453,6 +487,29 @@ Respond ONLY with valid JSON matching this structure:
             document.getElementById('epicsList').innerHTML = html;
         }
 
+        function renderSprintPlan(plan) {
+            let html = '<h4>Sprint Plan — ' + plan.sprints.length + ' sprints (' + plan.totalStoryPoints + ' SP total)</h4>';
+            plan.sprints.forEach(sprint => {
+                const pct = plan.capacityPerSprint > 0 ? Math.round((sprint.totalPoints / plan.capacityPerSprint) * 100) : 0;
+                html += '<details style="margin-bottom:10px; border:1px solid var(--vscode-panel-border); border-radius:4px; padding:8px;">';
+                html += '<summary style="cursor:pointer; font-weight:600;">' + sprint.name + ' — ' + sprint.totalPoints + '/' + plan.capacityPerSprint + ' SP';
+                html += ' <span style="font-size:11px; opacity:0.7;">(' + pct + '%)</span></summary>';
+                html += '<div style="margin-top:8px;">';
+                sprint.stories.forEach(s => {
+                    const isCritical = plan.criticalPath.includes(s.id);
+                    const icon = isCritical ? '⚡ ' : '';
+                    const pts = s.storyPoints !== undefined ? ' [' + s.storyPoints + ' SP]' : '';
+                    html += '<div style="padding:4px 0; font-size:12px;">' + icon + s.title + '<span style="opacity:0.6;">' + pts + '</span></div>';
+                });
+                html += '</div></details>';
+            });
+            document.getElementById('sprintPlanOutput').innerHTML = html;
+        }
+
+        document.getElementById('generateSprintBtn').addEventListener('click', () => {
+            const cap = parseInt(document.getElementById('capacityInput').value, 10) || 40;
+            vscode.postMessage({ type: 'generateSprintPlan', capacity: cap });
+        });
         document.getElementById('startDebateBtn').addEventListener('click', () => {
             vscode.postMessage({ type: 'start-debate', topic: document.getElementById('topicInput').value });
         });

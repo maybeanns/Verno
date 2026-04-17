@@ -161,4 +161,82 @@ export class JiraSyncService {
 
         return epics;
     }
+
+    // ─── Sprint API ───────────────────────────────────────────────────────────
+
+    /**
+     * Create a sprint on the given Jira board.
+     * Returns the new Jira sprint ID (string).
+     */
+    public async createSprint(
+        credentials: JiraCredentials,
+        boardId: string,
+        sprintName: string,
+        goal?: string
+    ): Promise<string> {
+        const api = new JiraApiService(credentials, this.logger);
+        const body: any = {
+            name: sprintName,
+            originBoardId: Number(boardId),
+        };
+        if (goal) { body.goal = goal; }
+
+        const result = await api.post('/rest/agile/1.0/sprint', body);
+        const id = String(result.id);
+        this.logger.info(`[JiraSyncService] Created sprint "${sprintName}" (id=${id})`);
+        return id;
+    }
+
+    /**
+     * Move a single issue into a sprint.
+     * Jira's Agile API accepts a batch endpoint so wrap in a single-issue call.
+     */
+    public async moveIssueToSprint(
+        credentials: JiraCredentials,
+        sprintId: string,
+        issueKey: string
+    ): Promise<void> {
+        const api = new JiraApiService(credentials, this.logger);
+        await api.post(`/rest/agile/1.0/sprint/${sprintId}/issue`, { issues: [issueKey] });
+        this.logger.debug(`[JiraSyncService] Moved ${issueKey} → sprint ${sprintId}`);
+    }
+
+    /**
+     * Full sprint sync: creates all planned sprints on the board then moves
+     * each story's Jira issue to the correct sprint.
+     *
+     * Stories must already have jiraKey set (run syncEpics first).
+     */
+    public async syncSprintPlan(
+        sprintPlan: import('../types/sprint').SprintPlan,
+        credentials: JiraCredentials,
+        boardId: string,
+        onProgress: (msg: string) => void
+    ): Promise<void> {
+        for (const sprint of sprintPlan.sprints) {
+            onProgress(`Creating ${sprint.name}…`);
+            const sprintId = await this.createSprint(
+                credentials,
+                boardId,
+                sprint.name,
+                `Capacity: ${sprint.totalPoints} / ${sprintPlan.capacityPerSprint} SP`
+            );
+            sprint.jiraSprintId = sprintId;
+
+            for (const story of sprint.stories) {
+                if (!story.jiraKey) {
+                    onProgress(`⚠️ No Jira key for story "${story.title}" — skipping sprint assignment`);
+                    continue;
+                }
+                onProgress(`  Moving ${story.jiraKey} → ${sprint.name}`);
+                try {
+                    await this.moveIssueToSprint(credentials, sprintId, story.jiraKey);
+                } catch (e: any) {
+                    this.logger.warn(`[JiraSyncService] Failed to move ${story.jiraKey}: ${e.message}`);
+                }
+            }
+        }
+        onProgress('✅ Sprint sync complete');
+    }
 }
+

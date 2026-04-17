@@ -2,9 +2,10 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as dotenv from 'dotenv';
 import { Logger } from './utils/logger';
 import { ConfigService } from './config/ConfigService';
-import { LLMService, GeminiProvider, GroqProvider } from './services/llm';
+import { LLMService, GeminiProvider, GroqProvider, AnthropicProvider, OpenAIProvider } from './services/llm';
 import { AgentRegistry, OrchestratorAgent } from './agents';
 import { PlanningAgent } from './agents/planning/PlanningAgent';
 import { FileService } from './services/file/FileService';
@@ -25,6 +26,15 @@ import { AudioSanitizer } from './services/audioSanitizer';
 import { SDLCWebviewPanel } from './panels/SDLCWebviewPanel';
 import { PRDDocument } from './types/sdlc';
 import { WorkspaceIntelligence } from './services/workspace/WorkspaceIntelligence';
+import { CoverageSidebarProvider } from './ui/panels/CoverageSidebarProvider';
+import { OtelInstrumentationService } from './services/project/OtelInstrumentationService';
+import { GrafanaDashboardService } from './services/project/GrafanaDashboardService';
+import { RunbookGeneratorService } from './services/project/RunbookGeneratorService';
+import { registerSecurityCommands } from './commands/security-commands';
+import { registerSecretScanCommands } from './commands/secret-scan-commands';
+import { ReadmeSyncService } from './services/documentation/ReadmeSyncService';
+import { registerDocumentationCommands } from './commands/DocumentationCommands';
+import { WelcomePanel } from './ui/onboarding/WelcomePanel';
 
 let logger: Logger;
 let configService: ConfigService;
@@ -68,6 +78,7 @@ async function cleanupStaleAudioFiles(logger: Logger) {
 export async function activate(context: vscode.ExtensionContext) {
 	try {
 		// Initialize services
+		dotenv.config({ path: path.join(context.extensionPath, '.env') });
 		logger = new Logger('Verno');
 		configService = new ConfigService();
 		configService.setSecretStorage(context.secrets); // Secure API key storage
@@ -85,6 +96,11 @@ export async function activate(context: vscode.ExtensionContext) {
 		audioSanitizer = new AudioSanitizer();
 
 		logger.info('Initializing Verno extension...');
+
+		// Phase 14: Show onboarding wizard on first activation
+		if (!context.globalState.get('verno.onboarded')) {
+			WelcomePanel.show(context);
+		}
 
 		// Cleanup stale audio files left over from previous sessions
 		cleanupStaleAudioFiles(logger);
@@ -147,6 +163,17 @@ export async function activate(context: vscode.ExtensionContext) {
 		);
 		logger.info('Enhanced Sidebar provider registered');
 
+		// Register Coverage Sidebar
+		const coverageSidebar = new CoverageSidebarProvider(workspaceRoot);
+		context.subscriptions.push(
+			vscode.window.registerWebviewViewProvider(
+				CoverageSidebarProvider.viewType,
+				coverageSidebar
+			)
+		);
+		logger.info('Coverage Sidebar provider registered');
+
+
 		// Register all agents
 		registerAllAgents();
 
@@ -154,6 +181,24 @@ export async function activate(context: vscode.ExtensionContext) {
 		StartRecordingCommand.register(context);
 		StopRecordingCommand.register(context);
 		ManageAgentsCommand.register(context);
+		registerSecurityCommands(context, logger);
+		
+		// Phase 10: Secret Scanner commands + status bar
+		registerSecretScanCommands(context, logger);
+
+		// Phase 11: Documentation commands (JSDoc + Changelog)
+		registerDocumentationCommands(context, llmService, logger);
+
+		// Phase 11: README Auto-Sync — offer to regenerate stale sections on file save
+		const readmeSyncService = new ReadmeSyncService(llmService, logger);
+		context.subscriptions.push(
+			vscode.workspace.onDidSaveTextDocument(async (document) => {
+				const workspaceFolders = vscode.workspace.workspaceFolders;
+				if (!workspaceFolders || workspaceFolders.length === 0) { return; }
+				const wsRoot = workspaceFolders[0].uri.fsPath;
+				await readmeSyncService.onFileSaved(document, wsRoot);
+			})
+		);
 
 		// Register main processing command (prompts in popup if no args)
 		const processCommand = vscode.commands.registerCommand('verno.processInput', async () => {
@@ -165,9 +210,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			logger.show();
 		});
 
-		// Register processing command that accepts apiKey, input, mode, and model from webview
-		const processWithData = vscode.commands.registerCommand('verno.processInputWithData', async (apiKey: string, input: string, mode: 'plan' | 'code' | 'ask' = 'code', model?: string) => {
-			await processUserInput(context, apiKey, input, mode, { fromWebview: true, model });
+		// Register processing command that accepts params from webview
+		const processWithData = vscode.commands.registerCommand('verno.processInputWithData', async (apiKey: string, input: string, mode: 'plan' | 'code' | 'ask' = 'code', provider?: string, model?: string) => {
+			await processUserInput(context, apiKey, input, mode, { fromWebview: true, provider, model });
 		});
 
 		// Register load conversation command
@@ -234,18 +279,12 @@ export async function activate(context: vscode.ExtensionContext) {
 			logger.info(`Voice conversation complete. Summary length: ${summary.length}, turns: ${transcript?.length || 0}`);
 			agentPanel.addMessage('system', '🎙️ Voice conversation captured. Processing your request...');
 
-			// Retrieve API key from SecretStorage (try gemini first, then groq)
-			let apiKey = await configService.getApiKey('gemini') || await configService.getApiKey('groq');
+			// Retrieve API key from SecretStorage (try groq first)
+			let apiKey = await configService.getApiKey('groq') || await configService.getApiKey('gemini');
 			if (!apiKey) {
-				apiKey = await vscode.window.showInputBox({
-					prompt: 'Enter your API key to process the voice conversation (stored securely)',
-					password: true,
-					ignoreFocusOut: true,
-					placeHolder: 'API key (Gemini: AIza... or Groq)'
-				});
+				apiKey = process.env.GROQ_API_KEY;
 				if (apiKey) {
-					const provider = configService.detectProvider(apiKey);
-					await configService.storeApiKey(provider, apiKey);
+					await configService.storeApiKey('groq', apiKey);
 				}
 			}
 			if (apiKey) {
@@ -332,7 +371,53 @@ export async function activate(context: vscode.ExtensionContext) {
 			vscode.window.showInformationMessage(`Cleared keys for: ${selected.join(', ')}`);
 		});
 
-		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd, processVoiceCmd, newConversationCmd, startSDLCCmd, startBMADCmd, clearApiKeysCmd);
+		// Phase 9: Observability — generate OTel, Grafana, and Runbook artifacts
+		const generateObservabilityCmd = vscode.commands.registerCommand('verno.generateObservability', async () => {
+			if (!workspaceRoot) {
+				vscode.window.showErrorMessage('No workspace folder open');
+				return;
+			}
+			try {
+				const wsIntelLocal = new WorkspaceIntelligence(configService);
+				const snapshot = await wsIntelLocal.getSnapshot();
+
+				const otelService = new OtelInstrumentationService(workspaceRoot);
+				const grafanaService = new GrafanaDashboardService(workspaceRoot);
+				const runbookService = new RunbookGeneratorService(workspaceRoot, llmService);
+
+				const otelFiles = await otelService.generateInstrumentation(snapshot);
+				const grafanaFiles = await grafanaService.generateDashboard(snapshot);
+				const runbookFiles = await runbookService.generateRunbook(snapshot);
+
+				const allFiles = [...otelFiles, ...grafanaFiles, ...runbookFiles];
+				logger.info(`Observability artifacts generated: ${allFiles.join(', ')}`);
+				vscode.window.showInformationMessage(`Observability scaffolding complete: ${allFiles.length} files generated.`);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				logger.error('Observability generation failed', err as Error);
+				vscode.window.showErrorMessage(`Observability generation failed: ${msg}`);
+			}
+		});
+
+		// Phase 14: Mode toggle status bar item
+		let vernoMode: 'chat' | 'sdlc' = 'chat';
+		const modeToggle = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 80);
+		modeToggle.text = '$(comment-discussion) Verno: Chat';
+		modeToggle.command = 'verno.toggleMode';
+		modeToggle.tooltip = 'Toggle between Chat and SDLC mode';
+		modeToggle.show();
+
+		const toggleModeCmd = vscode.commands.registerCommand('verno.toggleMode', () => {
+			vernoMode = vernoMode === 'chat' ? 'sdlc' : 'chat';
+			if (vernoMode === 'chat') {
+				modeToggle.text = '$(comment-discussion) Verno: Chat';
+			} else {
+				modeToggle.text = '$(tools) Verno: SDLC';
+			}
+			vscode.window.showInformationMessage(`Verno mode: ${vernoMode === 'chat' ? '💬 Conversational' : '🏗️ SDLC Pipeline'}`);
+		});
+
+		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd, processVoiceCmd, newConversationCmd, startSDLCCmd, startBMADCmd, clearApiKeysCmd, generateObservabilityCmd, toggleModeCmd, modeToggle);
 
 		logger.info('Verno extension activated successfully');
 		vscode.window.showInformationMessage('Verno extension is ready!');
@@ -395,34 +480,46 @@ async function processUserInput(
 	apiKeyArg?: string,
 	inputArg?: string,
 	mode: 'plan' | 'code' | 'ask' = 'code',
-	options: { fromWebview?: boolean; model?: string } = {}
+	options: { fromWebview?: boolean; provider?: string; model?: string } = {}
 ): Promise<void> {
 	try {
 		let apiKey = apiKeyArg;
 		let input = inputArg;
 
+		// Determine provider and model (from options, then config, then defaults)
+		let providerName = options.provider || await configService.getSelectedProvider() || 'groq';
+		let modelName = options.model || await configService.getSelectedModel(providerName) || '';
+
+		// If user selected generic provider dropdown string but no concrete id:
+		if (providerName) {
+			await configService.storeSelectedProvider(providerName);
+		}
+		if (modelName) {
+			await configService.storeSelectedModel(providerName, modelName);
+		}
+
 		// Retrieve API key from SecretStorage — only prompt if not yet stored
 		if (!apiKey) {
-			const modelName = options.model || '';
-			const preferredProvider = modelName === 'groq' ? 'groq' : 'gemini';
-			apiKey = await configService.getApiKey(preferredProvider)
-				|| await configService.getApiKey('groq')
-				|| await configService.getApiKey('gemini');
+			apiKey = await configService.getApiKey(providerName as 'gemini' | 'groq' | 'anthropic' | 'openai')
+				|| await configService.getApiKey('anthropic')
+				|| await configService.getApiKey('openai')
+				|| await configService.getApiKey('gemini')
+				|| await configService.getApiKey('groq');
 
 			if (!apiKey) {
-				apiKey = await vscode.window.showInputBox({
-					prompt: 'Enter your API key (Gemini: AIza... or Groq). It will be stored securely.',
-					password: true,
-					ignoreFocusOut: true
-				});
-				if (!apiKey) {
-					logger.warn('No API key provided');
-					return;
+				apiKey = process.env.GROQ_API_KEY;
+				if (apiKey) {
+					providerName = 'groq';
+					await configService.storeApiKey('groq', apiKey);
+					await configService.storeSelectedProvider(providerName);
+					logger.info('Verno: No API key found. Using GROQ_API_KEY from environment.');
+				} else {
+					logger.warn('Verno: No API key found in settings or environment.');
 				}
-				// Persist to SecretStorage so future calls don't need to prompt
-				const detectedProvider = configService.detectProvider(apiKey);
-				await configService.storeApiKey(detectedProvider, apiKey);
-				logger.info(`API key stored securely for provider: ${detectedProvider}`);
+			} else {
+				// Re-detect just in case the fallback chain triggered a mismatch
+				providerName = configService.detectProvider(apiKey);
+				await configService.storeSelectedProvider(providerName);
 			}
 		}
 
@@ -437,7 +534,7 @@ async function processUserInput(
 			}
 		}
 
-		logger.info(`Processing user input: ${input} (mode: ${mode}, model: ${options.model || 'auto'})`);
+		logger.info(`Processing user input: ${input} (mode: ${mode}, provider: ${providerName}, model: ${modelName || 'auto'})`);
 
 		// Show thinking indicator in UI
 		agentPanel.showThinking(true);
@@ -461,8 +558,15 @@ async function processUserInput(
 
 		// Initialize the appropriate provider based on model selection or API key detection
 		let provider;
-		const modelName = options.model || '';
-		if (modelName === 'groq' || (!modelName && !apiKey.startsWith('AIza'))) {
+		if (providerName === 'anthropic') {
+			provider = new AnthropicProvider();
+			if (modelName) (provider as AnthropicProvider).setModel(modelName as any);
+			logger.info('Using Anthropic provider');
+		} else if (providerName === 'openai') {
+			provider = new OpenAIProvider();
+			if (modelName) (provider as OpenAIProvider).setModel(modelName as any);
+			logger.info('Using OpenAI provider');
+		} else if (providerName === 'groq') {
 			provider = new GroqProvider();
 			logger.info('Using Groq provider');
 		} else {
@@ -471,6 +575,9 @@ async function processUserInput(
 		}
 		await provider.initialize(apiKey);
 		llmService.setProvider(provider);
+		llmService.setGlobalTokenListener((token: string) => {
+			agentPanel.addToken(token);
+		});
 
 		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 		if (!workspaceRoot) {
@@ -486,7 +593,8 @@ async function processUserInput(
 				userRequest: input,
 				conversationHistory,
 				mode,
-				timestamp: new Date().toISOString()
+				timestamp: new Date().toISOString(),
+				onToken: (token: string) => agentPanel.addToken(token)
 			})
 			.build();
 
