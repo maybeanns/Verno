@@ -77,7 +77,7 @@ A full automated SDLC pipeline triggered by a topic/feature request:
 ### Active (Must Implement — v1.0)
 
 **Mode Architecture**
-- [ ] **MOD-01** — Conversational mode: SDLC-aware advisor with real-time workspace analysis
+- [ ] **MOD-01** — Conversational mode\: SDLC-aware advisor with real-time workspace analysis
 - [ ] **MOD-02** — Development mode: full 9-phase pipeline with phase gating and progress tracking
 
 **Phase 1 — Requirements & PRD**

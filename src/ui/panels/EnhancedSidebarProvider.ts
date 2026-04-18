@@ -155,6 +155,24 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
              <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
             <style>
                 :root {
+                    --background: oklch(0.2046 0 0);
+                    --foreground: oklch(0.9219 0 0);
+                    --card: oklch(0.2686 0 0);
+                    --card-foreground: oklch(0.9219 0 0);
+                    --popover: oklch(0.2686 0 0);
+                    --popover-foreground: oklch(0.9219 0 0);
+                    --primary: oklch(0.7686 0.1647 70.0804);
+                    --primary-foreground: oklch(0 0 0);
+                    --secondary: oklch(0.2686 0 0);
+                    --secondary-foreground: oklch(0.9219 0 0);
+                    --muted: oklch(0.2393 0 0);
+                    --muted-foreground: oklch(0.7155 0 0);
+                    --accent: oklch(0.4732 0.1247 46.2007);
+                    --accent-foreground: oklch(0.9243 0.1151 95.7459);
+                    --destructive: oklch(0.6368 0.2078 25.3313);
+                    --destructive-foreground: oklch(1.0000 0 0);
+                    --border: oklch(0.3715 0 0);
+                    
                     --container-paddding: 20px;
                     --input-padding-vertical: 6px;
                     --input-padding-horizontal: 4px;
@@ -164,108 +182,140 @@ export class EnhancedSidebarProvider implements vscode.WebviewViewProvider {
                 body {
                     padding: 0;
                     margin: 0;
-                    font-family: var(--vscode-font-family);
-                    color: var(--vscode-foreground);
-                    background-color: var(--vscode-sideBar-background);
+                    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                    color: var(--foreground);
+                    background-color: var(--background);
+                    line-height: 1.5;
+                    -webkit-font-smoothing: antialiased;
                 }
                 .tabs {
                     display: flex;
-                    border-bottom: 1px solid var(--vscode-panel-border);
-                    background: var(--vscode-sideBar-background);
+                    border-bottom: 1px solid var(--border);
+                    background: var(--background);
+                    position: sticky;
+                    top: 0;
+                    z-index: 10;
+                    backdrop-filter: blur(12px);
                 }
                 .tab {
-                    padding: 10px 15px;
+                    padding: 12px 16px;
                     cursor: pointer;
-                    opacity: 0.7;
+                    opacity: 0.6;
                     border-bottom: 2px solid transparent;
                     font-size: 13px;
-                    font-weight: 500;
-                    transition: all 0.2s;
+                    font-weight: 600;
+                    letter-spacing: 0.02em;
+                    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+                    text-transform: uppercase;
                 }
-                .tab:hover { opacity: 1; background: var(--vscode-list-hoverBackground); }
+                .tab:hover { opacity: 1; background: var(--muted); }
                 .tab.active {
                     opacity: 1;
-                    border-bottom-color: var(--vscode-panelTitle-activeBorder);
-                    background: var(--vscode-list-activeSelectionBackground);
-                    color: var(--vscode-list-activeSelectionForeground);
+                    border-bottom-color: var(--primary);
+                    background: linear-gradient(to top, rgba(118, 134, 182, 0.1), transparent);
+                    color: var(--primary);
                 }
-                .content { padding: 15px; display: none; height: calc(100vh - 45px); overflow-y: auto; }
-                .content.active { display: block; }
+                .content { padding: 20px; display: none; height: calc(100vh - 45px); overflow-y: auto; }
+                .content.active { display: block; animation: fadeSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+                
+                @keyframes fadeSlideUp {
+                    from { opacity: 0; transform: translateY(8px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
                 
                 /* Cards */
                 .card {
-                    background: var(--vscode-editor-background);
-                    border: 1px solid var(--vscode-widget-border);
-                    border-radius: 6px;
-                    padding: 12px;
-                    margin-bottom: 12px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                    background: var(--card);
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-bottom: 16px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
+                    transition: transform 0.2s, box-shadow 0.2s;
+                }
+                .card:hover {
+                    box-shadow: 0 6px 16px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.05);
+                    transform: translateY(-2px);
                 }
                 .card-header {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    margin-bottom: 8px;
-                    font-weight: 600;
-                    font-size: 12px;
+                    margin-bottom: 12px;
+                    font-weight: 700;
+                    font-size: 11px;
                     text-transform: uppercase;
-                    color: var(--vscode-descriptionForeground);
+                    letter-spacing: 0.05em;
+                    color: var(--muted-foreground);
                 }
                 .card-title {
-                    font-size: 14px;
-                    font-weight: bold;
-                    color: var(--vscode-foreground);
-                    margin-bottom: 4px;
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: var(--foreground);
+                    margin-bottom: 8px;
                     text-transform: none;
                 }
                 
                 /* Conversation Specific */
                 .conv-card {
                     cursor: pointer;
-                    transition: transform 0.1s;
                     position: relative;
                 }
-                .conv-card:hover { border-color: var(--vscode-focusBorder); }
                 .conv-meta {
                     font-size: 11px;
-                    color: var(--vscode-descriptionForeground);
+                    color: var(--muted-foreground);
                     display: flex;
-                    gap: 10px;
+                    gap: 12px;
+                    align-items: center;
                 }
                 .mode-tag {
-                    background: var(--vscode-badge-background);
-                    color: var(--vscode-badge-foreground);
-                    padding: 2px 6px;
-                    border-radius: 4px;
+                    background: var(--primary);
+                    color: var(--primary-foreground);
+                    padding: 3px 8px;
+                    border-radius: 12px;
                     font-size: 10px;
+                    font-weight: 700;
+                    text-transform: uppercase;
                 }
                 .delete-btn {
                     position: absolute;
-                    top: 10px;
-                    right: 10px;
-                    background: transparent;
-                    border: none;
-                    color: var(--vscode-errorForeground);
+                    top: 12px;
+                    right: 12px;
+                    background: rgba(231,76,60,0.1);
+                    border: 1px solid rgba(231,76,60,0.2);
+                    border-radius: 4px;
+                    color: var(--destructive);
                     cursor: pointer;
                     opacity: 0;
                     font-weight: bold;
+                    width: 24px;
+                    height: 24px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: all 0.2s;
                 }
-                .conv-card:hover .delete-btn { opacity: 1; }
+                .delete-btn:hover { background: var(--destructive); color: var(--destructive-foreground); }
+                .conv-card:hover .delete-btn { opacity: 1; transform: scale(1); }
 
                 /* Feedback Specific */
                 .feedback-section h4 {
-                    margin: 8px 0 4px 0;
+                    margin: 12px 0 6px 0;
                     font-size: 12px;
-                    color: var(--vscode-textLink-foreground);
+                    text-transform: uppercase;
+                    letter-spacing: 0.05em;
+                    color: var(--primary);
                 }
-                .feedback-list { margin: 0; padding-left: 16px; font-size: 12px; }
-                .feedback-list li { margin-bottom: 4px; }
-                .issue-high { color: var(--vscode-errorForeground); }
-                .issue-medium { color: var(--vscode-charts-yellow); }
+                .feedback-list { margin: 0; padding-left: 16px; font-size: 13px; color: var(--foreground); }
+                .feedback-list li { margin-bottom: 6px; }
+                .issue-high { color: var(--destructive); font-weight: 600; }
+                .issue-medium { color: var(--accent); font-weight: 600; }
                 
                 /* Custom Scrollbar */
-                ::-webkit-scrollbar { width: 8px; }
-                ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 4px; }
+                ::-webkit-scrollbar { width: 6px; }
+                ::-webkit-scrollbar-track { background: transparent; }
+                ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+                ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
             </style>
         </head>
         <body>

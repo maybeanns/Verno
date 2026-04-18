@@ -220,9 +220,64 @@ export async function activate(context: vscode.ExtensionContext) {
 			await loadConversation(conversationId);
 		});
 
-		// Register SDLC Start command
+		// Register SDLC Start command — runs inline in sidebar chat (Kilo Code style)
 		const startSDLCCmd = vscode.commands.registerCommand('verno.startSDLC', async (topic?: string) => {
-			SDLCWebviewPanel.createOrShow(context, logger, llmService, topic);
+			const ok = await ensureLLMStatus(context);
+			if (!ok) {
+				vscode.window.showErrorMessage('Verno: No LLM provider found. Please configure an API key via the Profile button.');
+				return;
+			}
+			if (!topic || topic.trim().length === 0) {
+				topic = await vscode.window.showInputBox({
+					prompt: 'What are we building? Describe the feature or application.',
+					placeHolder: 'e.g. ecommerce website for shoes',
+					ignoreFocusOut: true
+				});
+				if (!topic) { return; }
+			}
+
+			const { DebateOrchestrator } = require('./agents/DebateOrchestrator');
+			const orchestrator = new DebateOrchestrator(llmService, logger);
+
+			// Show user message in sidebar chat
+			agentPanel.addMessage('user', `🏗️ Start SDLC: ${topic}`);
+			agentPanel.showThinking(true);
+			agentPanel.addMessage('system', '⚙️ Verno SDLC pipeline started. 8 AI agents are debating your requirements…');
+
+			try {
+				const prd = await orchestrator.runDebate(topic, (msg: import('./types/sdlc').DebateMessage) => {
+					const agentIcons: Record<string, string> = {
+						analyst: '📊', architect: '🏛️', ux: '🎨', developer: '💻',
+						pm: '📋', qa: '🧪', techwriter: '📝', security: '🔐'
+					};
+					const icon = agentIcons[msg.agentId] || '🤖';
+					const roundLabel = msg.type === 'consensus' ? 'CONSENSUS' : `Round ${msg.round}`;
+					agentPanel.addMessage('assistant', `${icon} **${msg.agentId.toUpperCase()}** (${roundLabel}):\n\n${msg.content}`);
+				});
+
+				agentPanel.showThinking(false);
+				agentPanel.addMessage('system', `✅ PRD generated: **${prd.title}**\n\nFiles written to \`.verno/PRD.md\` and \`.verno/prd.json\`.\n\nOpening PRD review panel…`);
+
+				// Persist to conversation
+				if (conversationService) {
+					try {
+						const convId = ensureConversation('plan');
+						conversationService.addMessage(convId, 'user', `Start SDLC: ${topic}`);
+						conversationService.addMessage(convId, 'assistant', `PRD generated: ${prd.title}`);
+					} catch (convErr) {
+						logger.warn(`Conversation persistence error: ${convErr}`);
+					}
+				}
+
+				// Open review panel with the completed PRD (no race condition — PRD already finished)
+				SDLCWebviewPanel.createOrShow(context, logger, llmService, undefined, prd);
+			} catch (err) {
+				agentPanel.showThinking(false);
+				const msg = err instanceof Error ? err.message : String(err);
+				agentPanel.addMessage('system', `❌ SDLC pipeline error: ${msg}`);
+				logger.error('[startSDLC] Pipeline failed', err as Error);
+				vscode.window.showErrorMessage(`Verno SDLC Error: ${msg}`);
+			}
 		});
 
 		// Register BMAD continuation command (called by SDLC after PRD approval)
@@ -421,6 +476,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
 		logger.info('Verno extension activated successfully');
 		vscode.window.showInformationMessage('Verno extension is ready!');
+
+		// Auto-initialize LLM if possible
+		ensureLLMStatus(context).then(ok => {
+			if (ok) logger.info('Verno: LLM provider ready on startup.');
+		});
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		logger.error('Failed to activate extension', error as Error);
@@ -521,6 +581,11 @@ async function processUserInput(
 				providerName = configService.detectProvider(apiKey);
 				await configService.storeSelectedProvider(providerName);
 			}
+		}
+		
+		if (!apiKey) {
+			vscode.window.showErrorMessage('No API key found. Please configure one in Verno settings.');
+			return;
 		}
 
 		if (!input) {
@@ -708,4 +773,36 @@ async function loadConversation(conversationId: string): Promise<void> {
 
 	logger.info(`Loaded conversation: ${conversationId}`);
 	vscode.window.showInformationMessage(`Loaded conversation: ${conv.title || 'Untitled Session'}`);
+}
+
+/**
+ * Ensures the LLMService has a provider and is initialized with an API key.
+ * First checks ConfigService for stored keys, then falls back to .env if available.
+ */
+async function ensureLLMStatus(context: vscode.ExtensionContext): Promise<boolean> {
+	if (llmService.isInitialized()) return true;
+
+	try {
+		// Attempt to load from ConfigService (secure storage)
+		let providerName = await configService.getSelectedProvider() || 'groq';
+		let apiKey = await configService.getApiKey(providerName as 'groq' | 'gemini');
+
+		if (!apiKey) {
+			// Fallback to process.env
+			apiKey = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || '';
+			if (apiKey) {
+				providerName = apiKey.startsWith('gsk_') ? 'groq' : 'gemini';
+			}
+		}
+
+		if (apiKey) {
+			const provider = providerName === 'groq' ? new GroqProvider() : new GeminiProvider();
+			await provider.initialize(apiKey);
+			llmService.setProvider(provider);
+			return true;
+		}
+	} catch (err) {
+		logger.error('Failed to auto-initialize LLM', err as Error);
+	}
+	return false;
 }

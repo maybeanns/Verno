@@ -104,21 +104,32 @@ export class SDLCWebviewPanel {
         });
     }
 
-    public static createOrShow(context: vscode.ExtensionContext, logger: Logger, llmService: LLMService, topic?: string) {
-        logger.info('[SDLCWebviewPanel] createOrShow triggered, topic: ' + topic);
+    public static createOrShow(context: vscode.ExtensionContext, logger: Logger, llmService: LLMService, topic?: string, prd?: PRDDocument) {
+        logger.info('[SDLCWebviewPanel] createOrShow triggered, prd: ' + (prd?.title ?? topic));
         if (SDLCWebviewPanel.currentPanel) {
             SDLCWebviewPanel.currentPanel.panel.reveal();
-            if (topic) {
-                SDLCWebviewPanel.currentPanel.panel.webview.postMessage({ type: 'init-topic', topic });
+            if (prd) {
+                // PRD already built — jump straight to review
+                SDLCWebviewPanel.currentPanel.state.prdDocument = prd;
+                SDLCWebviewPanel.currentPanel.setPhase('PRD_REVIEW');
+                SDLCWebviewPanel.currentPanel.panel.webview.postMessage({ type: 'prd-ready', payload: prd });
             }
             return;
         }
 
-        const panel = vscode.window.createWebviewPanel('sdlcFlow', 'Verno SDLC Orchestrator', vscode.ViewColumn.One, { enableScripts: true });
+        const panel = vscode.window.createWebviewPanel('sdlcFlow', 'Verno — PRD Review', vscode.ViewColumn.Beside, { enableScripts: true });
         SDLCWebviewPanel.currentPanel = new SDLCWebviewPanel(panel, context, logger, llmService);
         SDLCWebviewPanel.currentPanel.panel.webview.html = SDLCWebviewPanel.currentPanel.getHtml(SDLCWebviewPanel.currentPanel.panel.webview);
-        
-        if (topic) {
+
+        if (prd) {
+            // Debate already done in sidebar — jump straight to PRD review
+            SDLCWebviewPanel.currentPanel.state.prdDocument = prd;
+            setTimeout(() => {
+                SDLCWebviewPanel.currentPanel?.setPhase('PRD_REVIEW');
+                SDLCWebviewPanel.currentPanel?.panel.webview.postMessage({ type: 'prd-ready', payload: prd });
+            }, 300);
+        } else if (topic) {
+            // Legacy: show topic input with pre-filled topic
             setTimeout(() => {
                 SDLCWebviewPanel.currentPanel?.panel.webview.postMessage({ type: 'init-topic', topic });
             }, 500);
@@ -161,24 +172,42 @@ export class SDLCWebviewPanel {
     }
 
     private async runDebateFlow(feedback?: string) {
-        const topic = feedback ? `Feedback on previous PRD: ${feedback}` : this.state.topic;
-        
-        const prd = await this.debateOrchestrator.runDebate(topic, (msg) => {
-            this.state.debateMessages.push(msg);
-            this.saveState();
-            this.panel.webview.postMessage({ type: 'debate-message', payload: msg });
-        });
+        try {
+            const topic = feedback ? `Feedback on previous PRD: ${feedback}` : this.state.topic;
+            this.logger.info(`[SDLCWebviewPanel] Starting debate flow for topic: ${topic}`);
+            
+            const prd = await this.debateOrchestrator.runDebate(topic, (msg) => {
+                this.state.debateMessages.push(msg);
+                this.saveState();
+                this.panel.webview.postMessage({ type: 'debate-message', payload: msg });
+            });
 
-        this.state.prdDocument = prd;
-        this.setPhase('PRD_REVIEW');
-        this.panel.webview.postMessage({ type: 'prd-ready', payload: prd });
+            this.state.prdDocument = prd;
+            this.setPhase('PRD_REVIEW');
+            this.panel.webview.postMessage({ type: 'prd-ready', payload: prd });
+            this.saveState();
+            this.logger.info(`[SDLCWebviewPanel] PRD generation complete for ${prd.title}`);
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logger.error('[SDLCWebviewPanel] Debate flow failed', error as Error);
+            this.panel.webview.postMessage({ 
+                type: 'debate-message', 
+                payload: { 
+                    agent: 'System', 
+                    content: `❌ Error: ${msg}. Please check your API keys or connection.`,
+                    type: 'error'
+                } 
+            });
+            vscode.window.showErrorMessage(`Verno SDLC Error: ${msg}`);
+        }
     }
 
     private async decomposePRD() {
-        if (!this.state.prdDocument) return;
-        
-        this.logger.info('Decomposing PRD into Epics and Stories...');
-        const prompt = `You are a Technical Agile Coach. Decompose the following PRD into Epics, Stories, and SubTasks.
+        try {
+            if (!this.state.prdDocument) return;
+            
+            this.logger.info('[SDLCWebviewPanel] Decomposing PRD into Epics and Stories...');
+            const prompt = `You are a Technical Agile Coach. Decompose the following PRD into Epics, Stories, and SubTasks.
 Crucially, DIVIDE THESE TASKS exclusively among the 7 BMAD Agents: 
 ['analyst', 'architect', 'ux', 'developer', 'pm', 'qa', 'techwriter'].
 Ensure there are specific tasks distributed for everyone (e.g., QA tasks, Docs tasks, Architecture tasks).
@@ -213,11 +242,17 @@ Respond ONLY with valid JSON matching this structure:
   }
 ]`;
 
-        let result = await this.llmService.generateText(prompt);
-        result = result.replace(/```json/g, '').replace(/```/g, '').trim();
+            let prdJson = await this.llmService.generateText(prompt);
+        
+            // Robust JSON extraction
+            const jsonMatch = prdJson.match(/\[\s*\{[\s\S]*\}\s*\]/);
+            if (jsonMatch) {
+                prdJson = jsonMatch[0];
+            } else {
+                prdJson = prdJson.replace(/```json/gi, '').replace(/```/g, '').trim();
+            }
 
-        try {
-            this.state.epics = JSON.parse(result);
+            this.state.epics = JSON.parse(prdJson);
             if (!this.artifacts) {
                 const root = this.getWorkspaceRoot();
                 if (root) { this.artifacts = new VernoArtifactService(root); }
@@ -231,9 +266,11 @@ Respond ONLY with valid JSON matching this structure:
             
             const isAuth = await JiraAuthService.getInstance(this.context).isAuthenticated();
             this.panel.webview.postMessage({ type: 'jira-status', isAuth });
-        } catch(e: any) {
-            this.logger.error('Failed to decompose PRD: ' + e);
-            vscode.window.showErrorMessage('Decomposition failed. See logs.');
+        } catch(error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            this.logger.error('[SDLCWebviewPanel] PRD decomposition failed', error as Error);
+            vscode.window.showErrorMessage(`Verno Task Generation Error: ${msg}. Check logs and retry.`);
+            this.panel.webview.postMessage({ type: 'tasks-ready', payload: [] });
         }
     }
 
@@ -296,35 +333,151 @@ Respond ONLY with valid JSON matching this structure:
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}';">
     <style>
-        body { font-family: var(--vscode-font-family); background: var(--vscode-editor-background); color: var(--vscode-foreground); padding: 20px; }
-        .section { display: none; margin-bottom: 30px; }
+        :root {
+            --background: oklch(0.2046 0 0);
+            --foreground: oklch(0.9219 0 0);
+            --card: oklch(0.2686 0 0);
+            --card-foreground: oklch(0.9219 0 0);
+            --popover: oklch(0.2686 0 0);
+            --popover-foreground: oklch(0.9219 0 0);
+            --primary: oklch(0.7686 0.1647 70.0804);
+            --primary-foreground: oklch(0 0 0);
+            --secondary: oklch(0.2686 0 0);
+            --secondary-foreground: oklch(0.9219 0 0);
+            --muted: oklch(0.2393 0 0);
+            --muted-foreground: oklch(0.7155 0 0);
+            --accent: oklch(0.4732 0.1247 46.2007);
+            --accent-foreground: oklch(0.9243 0.1151 95.7459);
+            --destructive: oklch(0.6368 0.2078 25.3313);
+            --destructive-foreground: oklch(1.0000 0 0);
+            --border: oklch(0.3715 0 0);
+        }
+        body { 
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            background: var(--background); 
+            color: var(--foreground); 
+            padding: 30px; 
+            max-width: 900px;
+            margin: 0 auto;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+        h1, h2, h3, h4 { letter-spacing: -0.02em; font-weight: 600; margin-bottom: 1rem; color: var(--foreground); }
+        .section { 
+            display: none; 
+            margin-bottom: 40px; 
+            animation: spatialFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            opacity: 0;
+            transform: translateY(10px) scale(0.98);
+        }
         .active { display: block; }
-        .chat-msg { margin: 10px 0; padding: 10px; border-radius: 5px; background: var(--vscode-textBlockQuote-background); }
-        .chat-msg b { color: var(--vscode-textLink-foreground); }
-        button { padding: 8px 16px; background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; cursor: pointer; margin-right: 10px; }
-        button:hover { background: var(--vscode-button-hoverBackground); }
-        textarea, input { width: 100%; padding: 8px; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); margin-bottom: 15px; }
-        .prd-section { margin-bottom: 24px; border-left: 3px solid var(--vscode-panel-border); padding-left: 12px; }
-        .prd-section.security-section { border-left-color: #e67e22; }
-        .pill { display: inline-block; padding: 2px 6px; font-size: 10px; border-radius: 10px; background: #666; color: #fff; margin-left: 10px; }
-        .pill.pending { background: #f39c12; }
-        .pill.pushed { background: #2ecc71; }
-        .pill.failed { background: #e74c3c; }
-        /* Compliance flag badges */
-        .compliance-flags { margin-top: 10px; }
-        .flag-badge { display: block; margin: 4px 0; padding: 6px 10px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-        .flag-gdpr { background: rgba(52,152,219,0.15); border-left: 3px solid #3498db; color: #3498db; }
-        .flag-hipaa { background: rgba(231,76,60,0.15); border-left: 3px solid #e74c3c; color: #e74c3c; }
-        .flag-owasp { background: rgba(230,126,34,0.15); border-left: 3px solid #e67e22; color: #e67e22; }
-        /* Security agent highlight in debate log */
-        .chat-msg.security-agent { border-left: 3px solid #e74c3c; background: rgba(231,76,60,0.08); }
+        @keyframes spatialFade {
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        
+        .chat-msg { 
+            margin: 12px 0; 
+            padding: 16px; 
+            border-radius: 8px; 
+            background: var(--card);
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
+            backdrop-filter: blur(10px);
+        }
+        .chat-msg b { color: var(--primary); font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.05em; }
+        
+        button { 
+            padding: 10px 20px; 
+            background: var(--primary); 
+            color: var(--primary-foreground); 
+            border: none; 
+            border-radius: 6px;
+            cursor: pointer; 
+            margin-right: 12px; 
+            font-weight: 600;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2), inset 0 1px 1px rgba(255,255,255,0.2);
+        }
+        button:hover { 
+            filter: brightness(1.1); 
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.2);
+        }
+        button:active { transform: translateY(0); filter: brightness(0.9); }
+        
+        textarea, input { 
+            width: 100%; 
+            padding: 12px; 
+            box-sizing: border-box; 
+            background: var(--muted); 
+            color: var(--foreground); 
+            border: 1px solid var(--border); 
+            border-radius: 6px;
+            margin-bottom: 20px; 
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+        textarea:focus, input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px hsla(var(--accent), 0.2);
+        }
+        
+        .prd-section { 
+            margin-bottom: 30px; 
+            border-left: 2px solid var(--border); 
+            padding-left: 20px; 
+            background: var(--card);
+            padding: 20px 20px 20px 24px;
+            border-radius: 0 8px 8px 0;
+        }
+        .prd-section h4 { color: var(--primary); }
+        .prd-section.security-section { border-left-color: var(--accent); }
+        .prd-section.security-section h4 { color: var(--accent); }
+        
+        .pill { 
+            display: inline-block; 
+            padding: 4px 8px; 
+            font-size: 0.75rem; 
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            border-radius: 12px; 
+            background: var(--muted); 
+            color: var(--muted-foreground); 
+            margin-left: 12px; 
+            text-transform: uppercase;
+        }
+        .pill.pending { background: rgba(243,156,18,0.2); color: #f39c12; border: 1px solid rgba(243,156,18,0.4); }
+        .pill.pushed { background: rgba(46,204,113,0.2); color: #2ecc71; border: 1px solid rgba(46,204,113,0.4); }
+        .pill.failed { background: rgba(231,76,60,0.2); color: #e74c3c; border: 1px solid rgba(231,76,60,0.4); }
+        
+        .compliance-flags { margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+        .flag-badge { 
+            padding: 4px 10px; 
+            border-radius: 4px; 
+            font-size: 11px; 
+            font-weight: 700; 
+            letter-spacing: 0.05em;
+        }
+        .flag-gdpr { background: rgba(52,152,219,0.1); border: 1px solid rgba(52,152,219,0.3); color: #3498db; }
+        .flag-hipaa { background: rgba(231,76,60,0.1); border: 1px solid rgba(231,76,60,0.3); color: #e74c3c; }
+        .flag-owasp { background: rgba(230,126,34,0.1); border: 1px solid rgba(230,126,34,0.3); color: #e67e22; }
+        
+        .chat-msg.security-agent { 
+            border: 1px solid rgba(231,76,60,0.3); 
+            background: linear-gradient(to right, rgba(231,76,60,0.05), transparent); 
+        }
     </style>
 </head>
 <body>
-    <h1>SDLC Orchestrator</h1>
+    <h1>PRD Review &amp; Task Planning</h1>
 
     <!-- PRE-LOAD Check -->
-    <div id="loading" class="section active">Loading state...</div>
+    <div id="loading" class="section active" style="text-align:center; padding:40px; opacity:0.7;">
+        <div style="font-size:24px; margin-bottom:8px;">⚙️</div>
+        <div>Preparing PRD Review…</div>
+        <div style="font-size:11px; margin-top:8px; opacity:0.5;">The AI debate runs in the sidebar chat panel.</div>
+    </div>
 
     <!-- TOPIC_INPUT -->
     <div id="TOPIC_INPUT" class="section">
@@ -392,11 +545,12 @@ Respond ONLY with valid JSON matching this structure:
                     if (state.debateMessages) state.debateMessages.forEach(appendDebateMsg);
                     if (state.prdDocument) renderPRD(state.prdDocument);
                     if (state.epics && state.epics.length>0) renderEpics(state.epics);
-                } else {
-                    showSection('TOPIC_INPUT');
                 }
+                // else stay on loading spinner — prd-ready will arrive shortly
             } else if (msg.type === 'init-topic') {
-                document.getElementById('topicInput').value = msg.topic;
+                // Legacy path only: pre-fill topic input without auto-triggering debate
+                const ti = document.getElementById('topicInput');
+                if (ti) ti.value = msg.topic;
                 showSection('TOPIC_INPUT');
             } else if (msg.type === 'phase-changed') {
                 showSection(msg.phase);

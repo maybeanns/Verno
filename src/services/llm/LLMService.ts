@@ -169,6 +169,13 @@ export class LLMService {
     return this.provider;
   }
 
+  /**
+   * Check if a provider has been set and initialized
+   */
+  isInitialized(): boolean {
+    return this.provider !== null;
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }

@@ -131,13 +131,20 @@ Required sections (in this order):
 ]`;
 
         let prdJson = await this.llmService.generateText(prdPrompt);
-        prdJson = prdJson.replace(/```json/gi, '').replace(/```/g, '').trim();
+        
+        // Robust JSON extraction: look for the start of the array
+        const jsonMatch = prdJson.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        if (jsonMatch) {
+            prdJson = jsonMatch[0];
+        } else {
+            prdJson = prdJson.replace(/```json/gi, '').replace(/```/g, '').trim();
+        }
 
         let sections: PRDSection[] = [];
         try {
             sections = JSON.parse(prdJson);
         } catch (e) {
-            this.logger.error('Failed to parse PRD JSON', e as Error);
+            this.logger.error('Failed to parse PRD JSON, using fallback', e as Error);
             sections = [{
                 title: 'Overview and Synthesis',
                 content: convergenceResponse,
