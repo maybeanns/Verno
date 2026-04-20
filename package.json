@@ -101,6 +101,10 @@
       {
         "command": "verno.toggleMode",
         "title": "Verno: Toggle Chat / SDLC Mode"
+      },
+      {
+        "command": "verno.setupJira",
+        "title": "Verno: Setup Jira Integration"
       }
     ],
     "keybindings": [
@@ -243,6 +247,7 @@
     "dotenv": "^17.4.2",
     "form-data": "^4.0.5",
     "groq-sdk": "^0.37.0",
+    "node-pty": "^1.1.0",
     "onnxruntime-web": "^1.24.3",
     "tree-sitter-wasms": "^0.1.13",
     "web-tree-sitter": "^0.26.6"

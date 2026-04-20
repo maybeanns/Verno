@@ -105,7 +105,7 @@ export class JiraSyncService {
                         }
                         onUpdate(story.id, 'pushed');
 
-                        for (const sub of story.subtasks) {
+                        for (const sub of (story.subtasks || [])) {
                             if (sub.syncStatus === 'pushed' || sub.jiraKey) {
                                 sub.syncStatus = 'skipped';
                                 onUpdate(sub.id, 'skipped');
@@ -213,6 +213,13 @@ export class JiraSyncService {
         boardId: string,
         onProgress: (msg: string) => void
     ): Promise<void> {
+        if (!boardId || isNaN(Number(boardId))) {
+            const msg = `[JiraSyncService] syncSprintPlan requires a valid numeric boardId — got: "${boardId}". Update your Jira config with a boardId.`;
+            this.logger.error(msg);
+            onProgress(`❌ ${msg}`);
+            return;
+        }
+
         for (const sprint of sprintPlan.sprints) {
             onProgress(`Creating ${sprint.name}…`);
             const sprintId = await this.createSprint(

@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { JiraAuthService } from './JiraAuthService';
 import { JiraApiService } from './JiraApiService';
 import { Logger } from '../utils/logger';
+import { generateNonce } from '../utils/webviewSecurity';
 
 export class JiraSetupWebview {
     public static currentPanel: JiraSetupWebview | undefined;
@@ -19,7 +20,7 @@ export class JiraSetupWebview {
         this.context = context;
         this.logger = logger;
 
-        this.panel.webview.html = this.getHtml();
+        this.panel.webview.html = this.getHtml(panel.webview);
 
         this.panel.onDidDispose(() => this.dispose());
         this.panel.webview.onDidReceiveMessage(async (msg) => {
@@ -117,11 +118,13 @@ export class JiraSetupWebview {
         }
     }
 
-    private getHtml() {
+    private getHtml(webview: vscode.Webview) {
+        const nonce = generateNonce();
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}';">
     <style>
         body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 20px; max-width: 500px; margin: 0 auto; }
         .form-group { margin-bottom: 15px; }
@@ -166,7 +169,7 @@ export class JiraSetupWebview {
         <div id="setupSuccess" class="success">Jira configured successfully! You can close this tab.</div>
     </div>
 
-    <script nonce="nonceValue">
+    <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         
         document.getElementById('validateBtn').addEventListener('click', () => {

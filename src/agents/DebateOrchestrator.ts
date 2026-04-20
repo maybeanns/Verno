@@ -26,12 +26,12 @@ import { SecurityComplianceService } from '../services/project/SecurityComplianc
 // ─── Agent definitions ────────────────────────────────────────────────────────
 
 const DEBATE_AGENTS = [
-    { id: 'analyst',    role: 'Business Analyst (Focus on business requirements, KPIs, and user value)' },
-    { id: 'architect',  role: 'System Architect (Focus on backend scalability, data models, and API design)' },
-    { id: 'ux',         role: 'UX Designer (Focus on user flows, interfaces, and accessibility)' },
-    { id: 'developer',  role: 'Developer (Focus on code structure, technical feasibility, and components)' },
-    { id: 'pm',         role: 'Product Manager (Focus on scope, milestones, and prioritization)' },
-    { id: 'qa',         role: 'QA Engineer (Focus on edge cases, testability, and test plans)' },
+    { id: 'analyst', role: 'Business Analyst (Focus on business requirements, KPIs, and user value)' },
+    { id: 'architect', role: 'System Architect (Focus on backend scalability, data models, and API design)' },
+    { id: 'ux', role: 'UX Designer (Focus on user flows, interfaces, and accessibility)' },
+    { id: 'developer', role: 'Developer (Focus on code structure, technical feasibility, and components)' },
+    { id: 'pm', role: 'Product Manager (Focus on scope, milestones, and prioritization)' },
+    { id: 'qa', role: 'QA Engineer (Focus on edge cases, testability, and test plans)' },
     { id: 'techwriter', role: 'Technical Writer (Focus on documentation, readability, and API references)' },
     {
         id: 'security',
@@ -131,7 +131,7 @@ Required sections (in this order):
 ]`;
 
         let prdJson = await this.llmService.generateText(prdPrompt);
-        
+
         // Robust JSON extraction: look for the start of the array
         const jsonMatch = prdJson.match(/\[\s*\{[\s\S]*\}\s*\]/);
         if (jsonMatch) {

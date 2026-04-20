@@ -34,7 +34,7 @@ export class SDLCWebviewPanel {
     private readonly context: vscode.ExtensionContext;
     private readonly logger: Logger;
     private readonly llmService: LLMService;
-    
+
     private state: SDLCState = {
         currentPhase: 'TOPIC_INPUT',
         topic: '',
@@ -62,7 +62,7 @@ export class SDLCWebviewPanel {
             this.logger.info(`[SDLCWebviewPanel] Received message: ${JSON.stringify(message)}`);
             if (!validateWebviewMessage(message, SDLC_ALLOWED_TYPES, this.logger)) { return; }
             const msg = message as any; // type validated above
-            switch(msg.type) {
+            switch (msg.type) {
                 case 'start-debate':
                     this.state.topic = msg.topic;
                     this.setPhase('DEBATE');
@@ -175,7 +175,7 @@ export class SDLCWebviewPanel {
         try {
             const topic = feedback ? `Feedback on previous PRD: ${feedback}` : this.state.topic;
             this.logger.info(`[SDLCWebviewPanel] Starting debate flow for topic: ${topic}`);
-            
+
             const prd = await this.debateOrchestrator.runDebate(topic, (msg) => {
                 this.state.debateMessages.push(msg);
                 this.saveState();
@@ -190,13 +190,13 @@ export class SDLCWebviewPanel {
         } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             this.logger.error('[SDLCWebviewPanel] Debate flow failed', error as Error);
-            this.panel.webview.postMessage({ 
-                type: 'debate-message', 
-                payload: { 
-                    agent: 'System', 
+            this.panel.webview.postMessage({
+                type: 'debate-message',
+                payload: {
+                    agent: 'System',
                     content: `❌ Error: ${msg}. Please check your API keys or connection.`,
                     type: 'error'
-                } 
+                }
             });
             vscode.window.showErrorMessage(`Verno SDLC Error: ${msg}`);
         }
@@ -205,7 +205,7 @@ export class SDLCWebviewPanel {
     private async decomposePRD() {
         try {
             if (!this.state.prdDocument) return;
-            
+
             this.logger.info('[SDLCWebviewPanel] Decomposing PRD into Epics and Stories...');
             const prompt = `You are a Technical Agile Coach. Decompose the following PRD into Epics, Stories, and SubTasks.
 Crucially, DIVIDE THESE TASKS exclusively among the 7 BMAD Agents: 
@@ -243,7 +243,7 @@ Respond ONLY with valid JSON matching this structure:
 ]`;
 
             let prdJson = await this.llmService.generateText(prompt);
-        
+
             // Robust JSON extraction
             const jsonMatch = prdJson.match(/\[\s*\{[\s\S]*\}\s*\]/);
             if (jsonMatch) {
@@ -263,10 +263,10 @@ Respond ONLY with valid JSON matching this structure:
             }
             this.saveState();
             this.panel.webview.postMessage({ type: 'tasks-ready', payload: this.state.epics });
-            
+
             const isAuth = await JiraAuthService.getInstance(this.context).isAuthenticated();
             this.panel.webview.postMessage({ type: 'jira-status', isAuth });
-        } catch(error) {
+        } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             this.logger.error('[SDLCWebviewPanel] PRD decomposition failed', error as Error);
             vscode.window.showErrorMessage(`Verno Task Generation Error: ${msg}. Check logs and retry.`);
@@ -284,17 +284,17 @@ Respond ONLY with valid JSON matching this structure:
 
         const root = this.getWorkspaceRoot();
         if (!root) return;
-        
+
         let config: any = {};
         try {
             config = JSON.parse(fs.readFileSync(path.join(root, '.verno', 'jira-config.json'), 'utf-8'));
-        } catch(e) {
+        } catch (e) {
             vscode.window.showErrorMessage('Jira config missing. Run Jira Setup first.');
             return;
         }
 
         const syncService = new JiraSyncService(this.logger);
-        
+
         await syncService.syncEpics(
             this.state.epics,
             creds,

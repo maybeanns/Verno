@@ -35,6 +35,8 @@ import { registerSecretScanCommands } from './commands/secret-scan-commands';
 import { ReadmeSyncService } from './services/documentation/ReadmeSyncService';
 import { registerDocumentationCommands } from './commands/DocumentationCommands';
 import { WelcomePanel } from './ui/onboarding/WelcomePanel';
+import { JiraSetupWebview } from './jira/JiraSetupWebview';
+import { JiraAuthService } from './jira/JiraAuthService';
 
 let logger: Logger;
 let configService: ConfigService;
@@ -182,7 +184,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		StopRecordingCommand.register(context);
 		ManageAgentsCommand.register(context);
 		registerSecurityCommands(context, logger);
-		
+
 		// Phase 10: Secret Scanner commands + status bar
 		registerSecretScanCommands(context, logger);
 
@@ -240,23 +242,23 @@ export async function activate(context: vscode.ExtensionContext) {
 			const orchestrator = new DebateOrchestrator(llmService, logger);
 
 			// Show user message in sidebar chat
-			agentPanel.addMessage('user', `🏗️ Start SDLC: ${topic}`);
+			agentPanel.addMessage('user', `Start SDLC: ${topic}`);
 			agentPanel.showThinking(true);
-			agentPanel.addMessage('system', '⚙️ Verno SDLC pipeline started. 8 AI agents are debating your requirements…');
+			agentPanel.addMessage('system', ' Verno SDLC pipeline started. 8 AI agents are debating your requirements…');
 
 			try {
 				const prd = await orchestrator.runDebate(topic, (msg: import('./types/sdlc').DebateMessage) => {
 					const agentIcons: Record<string, string> = {
-						analyst: '📊', architect: '🏛️', ux: '🎨', developer: '💻',
-						pm: '📋', qa: '🧪', techwriter: '📝', security: '🔐'
+						analyst: '', architect: '', ux: '', developer: '',
+						pm: '', qa: '', techwriter: '', security: ''
 					};
-					const icon = agentIcons[msg.agentId] || '🤖';
+					const icon = agentIcons[msg.agentId] || '';
 					const roundLabel = msg.type === 'consensus' ? 'CONSENSUS' : `Round ${msg.round}`;
 					agentPanel.addMessage('assistant', `${icon} **${msg.agentId.toUpperCase()}** (${roundLabel}):\n\n${msg.content}`);
 				});
 
 				agentPanel.showThinking(false);
-				agentPanel.addMessage('system', `✅ PRD generated: **${prd.title}**\n\nFiles written to \`.verno/PRD.md\` and \`.verno/prd.json\`.\n\nOpening PRD review panel…`);
+				agentPanel.addMessage('system', `PRD generated: **${prd.title}**\n\nFiles written to \`.verno/PRD.md\` and \`.verno/prd.json\`.\n\nOpening PRD review panel…`);
 
 				// Persist to conversation
 				if (conversationService) {
@@ -274,7 +276,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			} catch (err) {
 				agentPanel.showThinking(false);
 				const msg = err instanceof Error ? err.message : String(err);
-				agentPanel.addMessage('system', `❌ SDLC pipeline error: ${msg}`);
+				agentPanel.addMessage('system', `SDLC pipeline error: ${msg}`);
 				logger.error('[startSDLC] Pipeline failed', err as Error);
 				vscode.window.showErrorMessage(`Verno SDLC Error: ${msg}`);
 			}
@@ -332,7 +334,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 			logger.info(`Voice conversation complete. Summary length: ${summary.length}, turns: ${transcript?.length || 0}`);
-			agentPanel.addMessage('system', '🎙️ Voice conversation captured. Processing your request...');
+			agentPanel.addMessage('system', 'Voice conversation captured. Processing your request...');
 
 			// Retrieve API key from SecretStorage (try groq first)
 			let apiKey = await configService.getApiKey('groq') || await configService.getApiKey('gemini');
@@ -357,7 +359,7 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 
 			// Show transcription in status bar
-			vscode.window.setStatusBarMessage(`🎙️ "${transcribedText}"`, 3000);
+			vscode.window.setStatusBarMessage(`"${transcribedText}"`, 3000);
 			logger.info(`Voice input (raw): "${transcribedText}"`);
 
 			// Sanitize: correct misheard identifiers against active file symbols
@@ -472,7 +474,15 @@ export async function activate(context: vscode.ExtensionContext) {
 			vscode.window.showInformationMessage(`Verno mode: ${vernoMode === 'chat' ? '💬 Conversational' : '🏗️ SDLC Pipeline'}`);
 		});
 
-		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd, processVoiceCmd, newConversationCmd, startSDLCCmd, startBMADCmd, clearApiKeysCmd, generateObservabilityCmd, toggleModeCmd, modeToggle);
+		// Initialize JiraAuthService singleton with context (needed by SDLCWebviewPanel + setupJira)
+		JiraAuthService.getInstance(context);
+
+		// Jira setup command — opens the Jira connection wizard standalone (no PRD flow required)
+		const setupJiraCmd = vscode.commands.registerCommand('verno.setupJira', () => {
+			JiraSetupWebview.createOrShow(context, logger);
+		});
+
+		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd, processVoiceCmd, newConversationCmd, startSDLCCmd, startBMADCmd, clearApiKeysCmd, generateObservabilityCmd, toggleModeCmd, modeToggle, setupJiraCmd);
 
 		logger.info('Verno extension activated successfully');
 		vscode.window.showInformationMessage('Verno extension is ready!');
@@ -582,7 +592,7 @@ async function processUserInput(
 				await configService.storeSelectedProvider(providerName);
 			}
 		}
-		
+
 		if (!apiKey) {
 			vscode.window.showErrorMessage('No API key found. Please configure one in Verno settings.');
 			return;
@@ -676,7 +686,7 @@ async function processUserInput(
 			// Plan mode detection: Should we trigger SDLC?
 			const lowerInput = input.toLowerCase();
 			const looksLikeProject = lowerInput.includes('build a') || lowerInput.includes('create a new') || lowerInput.includes('create an app') || input.split(' ').length > 50;
-			
+
 			if (looksLikeProject) {
 				const choice = await vscode.window.showInformationMessage('This looks like a large feature or project request. Would you like to run the SDLC Flow (PRD Generation + Jira Sync) first?', 'Yes, run SDLC', 'No, just generate code');
 				if (choice === 'Yes, run SDLC') {
