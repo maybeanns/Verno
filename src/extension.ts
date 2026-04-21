@@ -262,19 +262,36 @@ export async function activate(context: vscode.ExtensionContext) {
 
 					if (existingPrd && existingPrd.title && Array.isArray(existingPrd.sections) && existingPrd.sections.length > 0) {
 						const resumeChoice = await vscode.window.showInformationMessage(
-							`An existing PRD was found: "${existingPrd.title}". Do you want to resume the SDLC workflow or start a new debate?`,
-							'Resume Workflow',
+							`Existing PRD found: "${existingPrd.title}". How would you like to proceed?`,
+							'Skip to Execution',
+							'Review PRD',
 							'Start New Debate'
 						);
 
-						if (resumeChoice === 'Resume Workflow') {
+						if (resumeChoice === 'Skip to Execution') {
+							agentPanel.showThinking(true);
+							agentPanel.addMessage('system', 'Skipping to execution for: **' + existingPrd.title + '**. PRD loaded (' + existingPrd.sections.length + ' sections). BMAD agents starting...');
+							const orchestrator = agentRegistry.get('orchestrator') as any;
+							if (orchestrator) {
+								try {
+									await orchestrator.onPRDApproved(existingPrd, context, agentPanel);
+								} catch (execErr: any) {
+									agentPanel.showThinking(false);
+									agentPanel.addMessage('system', 'Execution failed: ' + (execErr.message || execErr));
+									vscode.window.showErrorMessage('BMAD Pipeline failed: ' + (execErr.message || execErr));
+								}
+							}
+							return;
+						}
+
+						if (resumeChoice === 'Review PRD') {
 							agentPanel.showThinking(false);
-							agentPanel.addMessage('system', `✅ Resuming SDLC pipeline from saved state: **${existingPrd.title}**...\n\nOpening PRD review panel…`);
-							// Bypass the DebateOrchestrator and jump straight to the Webview Phase
+							agentPanel.addMessage('system', 'Opening PRD for review: **' + existingPrd.title + '**');
 							const { SDLCWebviewPanel } = require('./panels/SDLCWebviewPanel');
 							SDLCWebviewPanel.createOrShow(context, logger, llmService, undefined, existingPrd);
 							return;
 						}
+						// 'Start New Debate' or dismissed - falls through to debate flow
 					}
 				} catch (err) {
 					logger.warn(`Failed to read existing PRD from workspace: ${err}`);

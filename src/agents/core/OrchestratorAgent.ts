@@ -139,7 +139,8 @@ export class OrchestratorAgent extends BaseAgent {
         .setMetadata({
             userRequest: `[APPROVED PRD ATTACHED]\n\nPlease implement the features described in this PRD:\n\n${prdString}`,
             mode: 'plan',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            agentPanel: agentPanel
         })
         .build();
 
@@ -266,6 +267,12 @@ export class OrchestratorAgent extends BaseAgent {
 
         this.log(`Executing step ${step.step}: ${step.agentName} — ${step.task}`);
 
+        const panel = context.metadata?.agentPanel as any;
+        if (panel) {
+            panel.addMessage('system', `⚙️ **${step.agentName}** is working on: ${step.task}`);
+            panel.showThinking(true);
+        }
+
         // Build context with accumulated outputs
         const agentContext: IAgentContext = {
           workspaceRoot: context.workspaceRoot,
@@ -280,6 +287,13 @@ export class OrchestratorAgent extends BaseAgent {
 
         try {
           const output = await agent.execute(agentContext);
+          
+          if (panel) {
+              panel.showThinking(false);
+              const snippet = output.length > 800 ? output.substring(0, 800) + '...\n\n[Output truncated]' : output;
+              panel.addMessage('assistant', `**${step.agentName} Finished:**\n\n${snippet}`);
+          }
+          
           planState.agentOutputs[step.agentId] = output;
           planState.completedSteps.push(step.agentId);
           planState.pendingSteps = planState.pendingSteps.filter(id => id !== step.agentId);
@@ -495,8 +509,21 @@ export class OrchestratorAgent extends BaseAgent {
         },
       };
 
+      const panel = context.metadata?.agentPanel as any;
+      if (panel) {
+          panel.addMessage('system', `⚙️ **${step.agentName}** is working on: ${step.task}`);
+          panel.showThinking(true);
+      }
+
       try {
         const output = await agent.execute(agentContext);
+        
+        if (panel) {
+            panel.showThinking(false);
+            const snippet = output.length > 800 ? output.substring(0, 800) + '...\n\n[Output truncated]' : output;
+            panel.addMessage('assistant', `**${step.agentName} Finished:**\n\n${snippet}`);
+        }
+
         agentOutputs[step.agentId] = output;
 
         // Mark complete in plan state
@@ -532,6 +559,11 @@ export class OrchestratorAgent extends BaseAgent {
         // Auto-generate unit tests after code generation
         try {
           this.log('Auto-generating unit tests for generated code...');
+          const panel = context.metadata?.agentPanel as any;
+          if (panel) {
+              panel.addMessage('system', `⚙️ **Test Generator** is working on unit tests...`);
+              panel.showThinking(true);
+          }
           const testGenAgent = this.agentRegistry.get('testGenerator');
           if (testGenAgent) {
             results.push(`\n## 🧪 Generating Unit Tests...`);
@@ -543,6 +575,11 @@ export class OrchestratorAgent extends BaseAgent {
               }
             };
             const testResult = await testGenAgent.execute(testContext);
+            if (panel) {
+                panel.showThinking(false);
+                const snippet = testResult.length > 800 ? testResult.substring(0, 800) + '...\n\n[Output truncated]' : testResult;
+                panel.addMessage('assistant', `**Test Generator Output:**\n\n${snippet}`);
+            }
             agentOutputs['testGenerator'] = testResult;
             results.push(`\n${testResult}`);
             if (this.planStateService) {
@@ -577,6 +614,12 @@ export class OrchestratorAgent extends BaseAgent {
 
     this.log('Running CodeReviewAgent to validate generated code...');
 
+    const panel = context.metadata?.agentPanel as any;
+    if (panel) {
+        panel.addMessage('system', `⚙️ **Code Reviewer** is analyzing the generated code...`);
+        panel.showThinking(true);
+    }
+
     const reviewContext: IAgentContext = {
       workspaceRoot: context.workspaceRoot,
       selectedText: context.selectedText,
@@ -590,6 +633,13 @@ export class OrchestratorAgent extends BaseAgent {
 
     try {
       const reviewResult = await reviewAgent.execute(reviewContext);
+
+      if (panel) {
+          panel.showThinking(false);
+          const snippet = reviewResult.length > 800 ? reviewResult.substring(0, 800) + '...\n\n[Output truncated]' : reviewResult;
+          panel.addMessage('assistant', `**Code Review:**\n\n${snippet}`);
+      }
+
       agentOutputs['codereview'] = reviewResult;
       results.push(`\n## 🔍 Code Review\n${reviewResult}`);
       this.log('CodeReviewAgent completed review');
@@ -612,6 +662,12 @@ export class OrchestratorAgent extends BaseAgent {
           ? 'skeleton or critical code issues'
           : 'quality issues found (NEEDS FIXES)';
         this.log(`Review verdict requires fix — retrying DeveloperAgent (reason: ${triggerReason})...`);
+
+        if (panel) {
+            panel.addMessage('system', `🔄 **Retrying Code Generation** (${triggerReason})...`);
+            panel.showThinking(true);
+        }
+
         results.push(`\n## 🔄 Retrying Code Generation (${triggerReason})\\n`);
 
 
@@ -633,6 +689,16 @@ export class OrchestratorAgent extends BaseAgent {
 
           try {
             const retryResult = await devAgent.execute(retryContext);
+
+            if (panel) {
+                panel.showThinking(false);
+                const snippet = retryResult.length > 800 ? retryResult.substring(0, 800) + '...\n\n[Output truncated]' : retryResult;
+                panel.addMessage('assistant', `**Developer Retry Output:**\n\n${snippet}`);
+
+                panel.addMessage('system', `⚙️ **Code Reviewer** is re-evaluating the retry...`);
+                panel.showThinking(true);
+            }
+
             agentOutputs['developer'] = retryResult;
             results.push(`\n## 💻 Code Generation (Retry)\n${retryResult}`);
 
@@ -646,6 +712,13 @@ export class OrchestratorAgent extends BaseAgent {
               metadata: { ...reviewContext.metadata, previousOutputs: agentOutputs },
             };
             const retryReview = await reviewAgent.execute(retryReviewContext);
+
+            if (panel) {
+                panel.showThinking(false);
+                const snippet = retryReview.length > 800 ? retryReview.substring(0, 800) + '...\n\n[Output truncated]' : retryReview;
+                panel.addMessage('assistant', `**Return Code Review:**\n\n${snippet}`);
+            }
+
             agentOutputs['codereview'] = retryReview;
             results.push(`\n## 🔍 Code Review (Retry)\n${retryReview}`);
           } catch (retryErr) {

@@ -4,6 +4,7 @@ import { LLMService } from '../../services/llm';
 import { FileService } from '../../services/file/FileService';
 import { FileChangeTracker } from '../../services/file/FileChangeTracker';
 import { FeedbackService, IssueSeverity } from '../../services/feedback';
+import { MermaidRenderService } from '../../services/documentation/MermaidRenderService';
 
 /**
  * Enhanced Architect Agent with Feedback Capabilities
@@ -50,8 +51,20 @@ Focus on:
 - Data Flow (Briefly)
 
 REQUIREMENT:
-1. Include standard Mermaid diagrams (\`\`\`mermaid) to visualize the architecture. At a minimum, include a System/Component diagram. Include a Sequence or ER diagram if applicable.
-2. Formalize any major architectural decisions inside your output using MADR (Markdown Architecture Decision Records) blocks formatted exactly like:
+1. You MUST generate the following 5 standard UML diagrams using Mermaid syntax in their own \`\`\`mermaid blocks. Create a section titled "## Automated Diagrams" and place them there:
+   - System Component Diagram (graph TD)
+   - Sequence Diagram (sequenceDiagram)
+   - Class Diagram (classDiagram)
+   - State Diagram (stateDiagram-v2)
+   - Entity Relationship Diagram (erDiagram) OR a Data Flow diagram if ER isn't applicable.
+
+2. CRITICAL MERMAID SYNTAX RULES - FOLLOW EXACTLY TO PREVENT SYSTEM CRASHES:
+   - Do NOT use unescaped special characters (like >, <, |, &, quotes) inside node text.
+   - Any node text containing spaces or special characters MUST be surrounded by quotes (e.g., A["My Node Text"]).
+   - Do NOT use HTML tags inside mermaid charts.
+   - Ensure all arrows are fully formed and correctly typed (e.g., -->, ->>).
+
+3. Formalize any major architectural decisions inside your output using MADR (Markdown Architecture Decision Records) blocks formatted exactly like:
    ===ADR===
    Title: [Title]
    Context: [Context]
@@ -122,6 +135,37 @@ Keep it technical and dense.`;
         this.changeTracker.recordChange(archPath, archContent.trim());
         this.log(`Architecture saved to ${archPath}`);
         completedTasks.push(`Saved architecture to ${archPath}`);
+
+        // Post-process: extract Mermaid blocks and render to PNG
+        try {
+          const mermaidService = new MermaidRenderService(context.workspaceRoot!, this.logger);
+          const diagrams = await mermaidService.processDocument(archContent, 'architecture');
+
+          if (diagrams.length > 0) {
+            let updatedContent = archContent;
+            for (const diagram of diagrams) {
+              if (diagram.relativePngPath) {
+                // Replace raw mermaid block with image reference
+                updatedContent = updatedContent.replace(
+                  diagram.originalBlock,
+                  `![${diagram.title}](${diagram.relativePngPath})`
+                );
+              }
+            }
+            // Re-write ARCHITECTURE.md with image references
+            await this.fileService.createFile(archPath, updatedContent.trim());
+            this.changeTracker.recordChange(archPath, updatedContent.trim());
+            this.log(`Updated ARCHITECTURE.md with ${diagrams.length} diagram image references`);
+            completedTasks.push(`Rendered ${diagrams.length} UML diagram(s) to PNG`);
+          }
+        } catch (mermaidErr: any) {
+          this.log(`Mermaid diagram rendering failed (non-fatal): ${mermaidErr.message || mermaidErr}`, 'warn');
+          issues.push({
+            severity: 'low' as IssueSeverity,
+            description: 'Mermaid diagram rendering failed',
+            context: `Error: ${mermaidErr}`
+          });
+        }
       } catch (err) {
         this.log(`Failed to write architecture: ${err}`, 'error');
         issues.push({

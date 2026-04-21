@@ -174,11 +174,11 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
 
         /* CONVERSATION */
         .conversation { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px; }
-        .message { display: flex; flex-direction: column; gap: 4px; max-width: 85%; animation: slideInY 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .message { display: flex; flex-direction: column; gap: 4px; max-width: 100%; animation: slideInY 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes slideInY { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .message.user { align-self: flex-end; }
         .message.assistant { align-self: flex-start; }
-        .message.system { align-self: center; max-width: 70%; }
+        .message.system { align-self: center; max-width: 100%; }
         .message-bubble { padding: 12px 16px; border-radius: 8px; line-height: 1.6; font-size: 14px; word-wrap: break-word; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .message.user .message-bubble { background: var(--primary); color: var(--primary-foreground); border-bottom-right-radius: 2px; }
         .message.assistant .message-bubble { background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
@@ -188,11 +188,11 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         .input-area { border-top: 1px solid var(--border); padding: 16px; background: var(--card); display: flex; flex-direction: column; gap: 10px; z-index: 40; }
         textarea { width: 100%; min-height: 60px; max-height: 200px; padding: 12px; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 6px; resize: vertical; font-family: inherit; font-size: 14px; transition: border-color 0.2s; }
         textarea:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 2px hsla(var(--focus), 0.2); }
-        .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; height: 32px; }
-        .left-ctrl { display: flex; gap: 8px; align-items: center; flex: 1; }
-        .tsel { height: 28px; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 4px; padding: 0 8px; font-size: 11px; cursor: pointer; outline: none; transition: border-color 0.2s; }
+        .toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; min-height: 32px; padding-top: 4px; }
+        .left-ctrl { display: flex; gap: 8px; align-items: center; flex: 1; flex-wrap: wrap; }
+        .tsel { height: 28px; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 4px; padding: 0 8px; font-size: 11px; cursor: pointer; outline: none; transition: border-color 0.2s; min-width: 120px; }
         .tsel:focus { border-color: var(--focus); }
-        .right-ctrl { display: flex; gap: 8px; align-items: center; }
+        .right-ctrl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
         .send-btn { height: 28px; padding: 0 16px; background: var(--btn-bg); color: var(--btn-fg); border: none; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.05em; }
         .sdlc-btn { height: 28px; padding: 0 16px; background: var(--accent); color: var(--accent-foreground); border: none; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.05em; }
         .send-btn:hover, .sdlc-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
@@ -253,6 +253,12 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         .vt-turn.verno { align-self: flex-start; background: rgba(0,200,255,0.1); color: #e0f4ff; border-left: 3px solid #00c8ff; }
         .vt-turn.user { align-self: flex-end; background: rgba(0,255,136,0.1); color: #e0ffec; border-right: 3px solid #00ff88; }
         .vt-turn .vt-label { font-size: 10px; font-weight: 800; text-transform: uppercase; opacity: 0.6; margin-bottom: 4px; letter-spacing: 0.05em; }
+
+        /* Voice Fallback Input */
+        .voice-fallback { display: flex; width: 90%; max-width: 480px; gap: 8px; background: rgba(255,255,255,0.05); padding: 8px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }
+        #voiceFallbackInput { flex: 1; background: transparent; border: none; color: #fff; padding: 8px 12px; font-family: inherit; font-size: 14px; outline: none; }
+        #voiceFallbackSend { background: var(--primary); color: var(--primary-foreground); border: none; padding: 0 16px; border-radius: 8px; font-weight: 700; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; }
+        #voiceFallbackSend:hover { filter: brightness(1.1); transform: translateY(-1px); }
 
         /* Voice buttons */
         .voice-end-btn { padding: 12px 24px; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; background: transparent; color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -886,9 +892,17 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         if(sdlcBtn) sdlcBtn.addEventListener('click',function(){
             var text = msgInput ? msgInput.value.trim() : '';
             var apiKey = getProviderKey(S.provider || S.model);
+            
+            var fullContext = text;
+            if (window.voiceTranscriptContext && window.voiceTranscriptContext.length > 0) {
+                var compiled = window.voiceTranscriptContext.map(function(t) { return (t.role === 'user' ? 'User: ' : 'Verno: ') + t.text; }).join('\\n\\n');
+                fullContext = "Recent Voice Conversation Context:\\n" + compiled + "\\n\\nUser Request: " + (text || "Start SDLC based on the above context.");
+                window.voiceTranscriptContext = [];
+            }
+
             vscode.postMessage({
                 type:'start-sdlc', 
-                input: text, 
+                input: fullContext, 
                 apiKey: apiKey,
                 provider: S.provider,
                 model: S.model
@@ -1029,6 +1043,7 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
             if (!overlay || !voiceBtn) return;
 
             var transcript = [];
+            window.voiceTranscriptContext = transcript;
             var isListening = false;
             var isSpeaking = false;
             var isProcessing = false;
@@ -1119,73 +1134,17 @@ function log(msg) {
 // --- RECORDING CONTROL ---
 
 var recordingTimeout = null;
-var myvad = null;
-
-async function initVAD() {
-    if (myvad || !window.vad) return;
-    try {
-        log('Initializing WebAssembly VAD...');
-        myvad = await window.vad.MicVAD.new({
-            workletURL: vadPaths ? vadPaths.workletPath : '',
-            modelURL: vadPaths ? vadPaths.modelPath : '',
-            ortConfig: {
-                wasmPaths: {
-                    "ort-wasm.wasm": vadPaths ? vadPaths.wasmRoot + 'ort-wasm.wasm' : '',
-                    "ort-wasm-simd.wasm": vadPaths ? vadPaths.wasmRoot + 'ort-wasm-simd.wasm' : '',
-                    "ort-wasm-threaded.wasm": vadPaths ? vadPaths.wasmRoot + 'ort-wasm-threaded.wasm' : '',
-                    "ort-wasm-simd-threaded.wasm": vadPaths ? vadPaths.wasmRoot + 'ort-wasm-simd-threaded.wasm' : ''
-                }
-            },
-            onSpeechStart: function() {
-                log('Speech started.');
-                setStatus('listening', 'Hearing you...');
-                setWaveActive(true);
-            },
-            onSpeechEnd: function(audio) {
-                log('Speech ended. Processing Int16 PCM...');
-                setWaveActive(false);
-                setStatus('thinking', 'Processing...');
-                
-                var int16Array = new Int16Array(audio.length);
-                for (var i = 0; i < audio.length; i++) {
-                    var s = Math.max(-1, Math.min(1, audio[i]));
-                    int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                }
-                
-                vscode.postMessage({ type: 'vadAudioData', audioData: Array.from(int16Array) });
-                stopListening();
-            },
-            onVADMisfire: function() {
-                log('VAD misfire (too short).');
-            }
-        });
-        log('VAD initialized successfully.');
-    } catch (e) {
-        log('VAD Init Error: ' + e);
-    }
-}
 
 function startListening() {
     if (isSpeaking || isListening || isProcessing) return;
 
     isListening = true;
     log('Starting native recording...');
-    setStatus('listening', 'Initializing Mic...');
+    setStatus('listening', 'Listening...');
     updateRecordBtn(true);
+    setWaveActive(true);
 
-    if (!myvad) {
-        initVAD().then(function() {
-            if (isListening && myvad) {
-                myvad.start();
-                setStatus('listening', 'Listening...');
-                setWaveActive(true);
-            }
-        });
-    } else {
-        myvad.start();
-        setStatus('listening', 'Listening...');
-        setWaveActive(true);
-    }
+    vscode.postMessage({ type: 'startRecording' });
 
     // Auto-stop after MAX_RECORD_DURATION
     if (recordingTimeout) clearTimeout(recordingTimeout);
@@ -1202,7 +1161,7 @@ function stopListening() {
         log('Stopping native recording...');
         isListening = false;
         
-        if (myvad) myvad.pause();
+        vscode.postMessage({ type: 'stopRecording' });
 
         if (recordingTimeout) { clearTimeout(recordingTimeout); recordingTimeout = null; }
 
@@ -1267,6 +1226,7 @@ window.handleNewMessage = function (role, content) {
     // We speak if: Voice Overlay is showing AND rule is assistant
     if (overlay.classList.contains('show') && role === 'assistant') {
         // Add to transcript
+        transcript.push({ role: 'verno', text: content });
         addTranscriptTurn('verno', content);
 
         // Speak, then Auto-Listen
@@ -1341,19 +1301,17 @@ function submitToAgent(text) {
     // We do NOT close voice here. We stay open for the reply.
     addMsg('user', text); // Add to main chat history too
 
-    var apiKey = getProviderKey(S.model);
-    if (apiKey) {
-        vscode.postMessage({ type: 'processInputSubmit', input: text, apiKey: apiKey, mode: S.mode, model: S.model });
-    } else {
-        // No key? Fallback
-        addMsg('system', 'No API Key found. Ending voice session.');
-        closeVoice();
-    }
+    var apiKey = getProviderKey(S.provider || S.model);
+    
+    // Always force 'ask' (conversational) mode for voice input so it chats instead of auto-executing SDLC code phase.
+    var outMode = 'ask';
+    vscode.postMessage({ type: 'processInputSubmit', input: text, apiKey: apiKey, mode: outMode, provider: S.provider, model: S.model });
 }
 
 // Open/Close
 function openVoice(isRestore) {
     transcript = [];
+    window.voiceTranscriptContext = transcript;
     if (transcriptEl) transcriptEl.innerHTML = '';
     if (fallbackWrap) fallbackWrap.classList.remove('show');
     overlay.classList.add('show');
