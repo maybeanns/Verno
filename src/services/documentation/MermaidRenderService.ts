@@ -104,14 +104,17 @@ export class MermaidRenderService {
             const pngPath = path.join(this.diagramDir, `${baseName}.png`);
             const relativePngPath = path.relative(this.workspaceRoot, pngPath).replace(/\\/g, '/');
 
-            // Always write .mmd source
-            fs.writeFileSync(mmdPath, block.code, 'utf-8');
+            // Sanitize mermaid code before writing — fix common LLM syntax errors
+            const sanitizedCode = this.sanitizeMermaidCode(block.code);
+
+            // Always write .mmd source (sanitized)
+            fs.writeFileSync(mmdPath, sanitizedCode, 'utf-8');
             this.log(`Saved mermaid source: ${mmdPath}`);
 
             // Attempt PNG conversion
             let pngGenerated: string | null = null;
             try {
-                pngGenerated = await this.renderToPng(block.code, pngPath);
+                pngGenerated = await this.renderToPng(sanitizedCode, pngPath);
             } catch (err: any) {
                 this.log(`PNG rendering failed for ${baseName}: ${err.message || err}`, 'warn');
             }
@@ -222,6 +225,72 @@ export class MermaidRenderService {
         }
 
         return null;
+    }
+
+    /**
+     * Fix common LLM-generated Mermaid syntax errors.
+     * 
+     * Common mistakes:
+     * - Using `participant` in `graph` or `flowchart` diagrams (sequenceDiagram-only keyword)
+     * - Invalid arrow syntax like `-->|label|>` (should be `-->|label|`)
+     * - Mixed diagram types
+     */
+    private sanitizeMermaidCode(code: string): string {
+        let lines = code.split('\n');
+        let sanitized: string[] = [];
+        let diagramType = '';
+
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i].trimEnd();
+            
+            // Detect diagram type from the first non-empty line
+            if (!diagramType && line.trim()) {
+                const typeMatch = line.trim().match(/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitgraph|mindmap|C4Context|C4Container|C4Component|C4Deployment)/i);
+                if (typeMatch) {
+                    diagramType = typeMatch[1].toLowerCase();
+                }
+            }
+
+            // Fix 1: `participant` used in graph/flowchart → convert to node definitions
+            if ((diagramType === 'graph' || diagramType === 'flowchart') && /^\s*participant\s+/i.test(line)) {
+                const m = line.match(/^\s*participant\s+(\w+)\s+as\s+"([^"]+)"/i);
+                if (m) {
+                    // Skip — we'll use the node ID inline in edges
+                    continue;
+                }
+                const m2 = line.match(/^\s*participant\s+(\w+)/i);
+                if (m2) {
+                    continue; // Skip bare participant declarations — they'll appear as node IDs in edges
+                }
+            }
+
+            // Fix 2: Invalid arrow syntax `-->|label|>` → `-->|label|`
+            line = line.replace(/-->\|([^|]*)\|>/g, '-->|$1|');
+            
+            // Fix 3: Invalid arrow syntax `-->|label|>NodeId` → `-->|label| NodeId`
+            line = line.replace(/-->\|([^|]*)\|>(\w)/g, '-->|$1| $2');
+            
+            // Fix 4: Arrow `-- label -->` is valid, but `-- label ->` is not — fix to `-->` 
+            line = line.replace(/--\s*([^-]*?)\s*->/g, '-->|$1|');
+            
+            // Fix 5: Remove empty labels `-->||`
+            line = line.replace(/-->\|\|/g, '-->');
+
+            sanitized.push(line);
+        }
+
+        // If diagram is graph/flowchart but had `participant` (now removed), 
+        // ensure it's still valid by keeping it as-is
+        let result = sanitized.join('\n');
+
+        // Fix 6: If the diagram has NO valid diagram type, prefix with `graph LR`
+        const firstLine = result.trim().split('\n')[0]?.trim() || '';
+        const validTypes = /^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitgraph|mindmap|C4Context|C4Container|C4Component|C4Deployment)/i;
+        if (!validTypes.test(firstLine)) {
+            result = 'graph LR\n' + result;
+        }
+
+        return result;
     }
 
     private log(message: string, level: string = 'info') {

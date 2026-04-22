@@ -38,43 +38,131 @@ export class ArchitectAgent extends BaseAgent {
     const previousOutputs = (context.metadata?.previousOutputs || {}) as Record<string, string>;
     const analysis = previousOutputs['analyst'] || '';
 
-    const prompt = `You are Winston, a senior system architect.
+    const prompt = `You are a principal software architect at a top-tier tech company (think AWS, Netflix, or Shopify level).
+
 User Request: ${context.metadata?.userRequest || 'design system architecture'}
 
 CONTEXT:
 ${analysis.substring(0, 8000)}
 
-Provide a CONCISE, HIGH-LEVEL architecture design in markdown.
-Focus on:
-- System Modules & Responsibilities
-- Tech Stack Recommendation (Why?)
-- Data Flow (Briefly)
+Your job is to generate a comprehensive system architecture document following this exact INDUSTRY-GRADE ARCHITECTURE DOCUMENT STRUCTURE:
 
-REQUIREMENT:
-1. You MUST generate the following 5 standard UML diagrams using Mermaid syntax in their own \`\`\`mermaid blocks. Create a section titled "## Automated Diagrams" and place them there:
-   - System Component Diagram (graph TD)
-   - Sequence Diagram (sequenceDiagram)
-   - Class Diagram (classDiagram)
-   - State Diagram (stateDiagram-v2)
-   - Entity Relationship Diagram (erDiagram) OR a Data Flow diagram if ER isn't applicable.
+### 1. Document Header
+- System / Product Name
+- Author(s) & Roles
+- Created Date / Last Updated
+- Version Number (e.g., v1.0)
+- Status: [Draft | In Review | Approved | Deprecated]
+- Reviewers & Approvers (list by name/role)
 
-2. CRITICAL MERMAID SYNTAX RULES - FOLLOW EXACTLY TO PREVENT SYSTEM CRASHES:
-   - Do NOT use unescaped special characters (like >, <, |, &, quotes) inside node text.
-   - Any node text containing spaces or special characters MUST be surrounded by quotes (e.g., A["My Node Text"]).
-   - Do NOT use HTML tags inside mermaid charts.
-   - Ensure all arrows are fully formed and correctly typed (e.g., -->, ->>).
+### 2. Executive Summary
+- 3–5 sentence overview of the system being built
+- Key architectural goals (e.g., scalability, maintainability, security)
+- Link to related PRD or product spec
 
-3. Formalize any major architectural decisions inside your output using MADR (Markdown Architecture Decision Records) blocks formatted exactly like:
-   ===ADR===
-   Title: [Title]
-   Context: [Context]
-   Decision: [Decision]
-   Consequences: [Consequences]
-   ===END_ADR===
+### 3. System Context & Scope
+- What does this system do at a high level?
+- What is explicitly OUT of scope for this architecture?
+- External systems or actors this system interacts with (users, third-party APIs, payment providers, etc.)
 
-DO NOT generate generic explanations of what "scalability" means.
-DO NOT use large ASCII art unless critical.
-Keep it technical and dense.`;
+### 4. Architecture Principles
+List the guiding principles driving every decision. Examples:
+- Separation of concerns
+- Fail fast & recover gracefully
+- Security by design
+- Prefer managed services over self-hosted where possible
+- Design for horizontal scalability
+
+### 5. System Modules & Responsibilities
+For each module:
+- *Name*
+- *Responsibility* (1–2 sentences, specific)
+- *Interfaces* (what it exposes or consumes)
+- *Technology* (resolved — no "X or Y" ambiguity)
+- *Owner / Team* (if known)
+
+### 6. Resolved Tech Stack
+Present as a table. Every choice MUST be resolved — no "or" options.
+
+### 7. System Architecture Diagrams
+Include ALL of the following using valid Mermaid syntax.
+*7a. High-Level Context Diagram (C4 Level 1)*
+*7b. Container Diagram (C4 Level 2)*
+*7c. Data Flow Diagram* (Must show BOTH happy path AND cache-hit path, and security checkpoints)
+
+MERMAID RULES (CRITICAL — FOLLOW EXACTLY):
+- Use \`graph LR\` or \`flowchart LR\` for architecture diagrams. NEVER use \`sequenceDiagram\` for these.
+- NEVER use \`participant\` in graph/flowchart diagrams. \`participant\` is ONLY for \`sequenceDiagram\`.
+- Arrow syntax: \`A -->|label| B\` (with a space before B). NEVER use \`-->|label|>\`.
+- Node IDs must be camelCase with NO spaces: \`userAuth\`, \`productCatalog\`, \`paymentAPI\`.
+- Use square brackets for labels: \`userAuth[User Auth Service]\`.
+- Example of CORRECT syntax:
+\`\`\`mermaid
+graph LR
+    user[User] -->|browses| frontend[Frontend SPA]
+    frontend -->|REST API| apiGateway[API Gateway]
+    apiGateway -->|routes| productService[Product Service]
+    productService -->|queries| database[(PostgreSQL)]
+\`\`\`
+- For data flow, use \`sequenceDiagram\` with proper participant declarations:
+\`\`\`mermaid
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant A as API
+    U->>F: Browse products
+    F->>A: GET /products
+    A-->>F: Product list
+\`\`\`
+
+### 8. API Contract
+Include endpoint table, versioning strategy, auth mechanism, rate limiting, and error format.
+
+### 9. Data Model
+Include schema block or erDiagram.
+
+### 10. Caching Strategy
+Specify pattern, what is cached, key structure, TTL, invalidation, cold start, and eviction.
+
+### 11. Security Architecture
+Cover auth model, encryption, secrets management, input validation, OWASP mitigations, GDPR, and security headers.
+
+### 12. Infrastructure & Deployment Architecture
+Include provider, containerization, environment strategy, CI/CD, IaC, and rollback strategy. Include a deployment diagram.
+
+### 13. Scalability & Performance
+Include load expectations, scaling strategy, load balancing, DB scaling, CDN, and performance budgets.
+
+### 14. Reliability & Error Handling
+Include failure modes, fallback, retry, circuit breaker, SLA, and health checks.
+
+### 15. Observability
+Include logging, metrics, tracing, alerting, and dashboard requirements.
+
+### 16. Architecture Decision Records (ADRs)
+Minimum required ADRs: Frontend framework, Backend language, Database choice, Caching strategy, Authentication, Deployment platform.
+Format each ADR as:
+===ADR===
+Title: [Title]
+Context: [Context]
+Decision: [Decision]
+Consequences: [Consequences]
+===END_ADR===
+
+### 17. Open Questions & Risks
+Table with Question/Risk, Owner, Due Date, and Status.
+
+---
+
+## REWRITING RULES (apply strictly)
+1. Resolve all "X or Y" decisions.
+2. Fix all Mermaid syntax errors. Correct arrow syntax (-->|label|).
+3. Complete the cache flow (show read and write paths).
+4. Integrate the Security Module into diagrams.
+5. Populate all ADR stubs.
+6. Map back to NFRs (scalability, uptime).
+7. Add all failure modes.
+8. Output a single clean .md file.`;
 
     let buffer = '';
     try {

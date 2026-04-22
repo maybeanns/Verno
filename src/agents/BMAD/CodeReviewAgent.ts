@@ -61,6 +61,27 @@ export class CodeReviewAgent extends BaseAgent {
         this.log(`Parsed ${files.length} files from developer output`);
         completedTasks.push(`Parsed ${files.length} files for review`);
 
+        // If text parsing found no/few files, scan the actual project directory on disk
+        let projectDir = context.workspaceRoot || '';
+        try {
+            const outputDirMatch = developerOutput.match(/<!-- OUTPUT_DIR: (.+?) -->/);
+            if (outputDirMatch) {
+                projectDir = outputDirMatch[1].trim();
+            }
+        } catch { /* non-critical */ }
+
+        if (files.length < 3 && projectDir && require('fs').existsSync(projectDir)) {
+            this.log(`Text parsing found only ${files.length} files — scanning project directory: ${projectDir}`);
+            const scanFiles = this.scanDirectoryForCode(projectDir);
+            if (scanFiles.length > files.length) {
+                this.log(`Found ${scanFiles.length} source files on disk (vs ${files.length} from text)`);
+                files.length = 0;
+                files.push(...scanFiles);
+                completedTasks.push(`Scanned ${scanFiles.length} files from project directory`);
+            }
+        }
+
+
         // ── 2. Static skeleton detection ──
         const skeletonIssues = this.detectSkeletonCode(files);
         if (skeletonIssues.length > 0) {
@@ -80,8 +101,8 @@ export class CodeReviewAgent extends BaseAgent {
         let compilationResult = '';
         let testResult = '';
         if (context.workspaceRoot) {
-            compilationResult = await this.checkCompilation(context.workspaceRoot, completedTasks, issues);
-            testResult = await this.checkTests(context.workspaceRoot, completedTasks, issues);
+            compilationResult = await this.checkCompilation(projectDir || context.workspaceRoot, completedTasks, issues);
+            testResult = await this.checkTests(projectDir || context.workspaceRoot, completedTasks, issues);
         }
 
         // ── 5. Determine verdict ──
@@ -389,6 +410,41 @@ Be direct and specific. If the code is just skeleton/template code with empty bo
     // ════════════════════════════════════════════
     // Utility
     // ════════════════════════════════════════════
+
+    
+    /**
+     * Scan the project directory on disk for actual source code files.
+     * Fallback when text parsing finds too few files.
+     */
+    private scanDirectoryForCode(dir: string): Array<{ name: string; content: string }> {
+        const files: Array<{ name: string; content: string }> = [];
+        const fs = require('fs');
+        const path = require('path');
+        const ignoreDirs = new Set(['.git', 'node_modules', '.verno', '.planning', 'dist', 'build', 'coverage']);
+        const codeExts = new Set(['.ts', '.tsx', '.js', '.jsx', '.css', '.html', '.json', '.py', '.java', '.go', '.rs']);
+
+        const walk = (currentDir: string, relBase: string) => {
+            try {
+                const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (entry.name.startsWith('.') || ignoreDirs.has(entry.name)) continue;
+                    const fullPath = path.join(currentDir, entry.name);
+                    const relPath = relBase ? relBase + '/' + entry.name : entry.name;
+                    if (entry.isDirectory()) {
+                        walk(fullPath, relPath);
+                    } else if (codeExts.has(path.extname(entry.name).toLowerCase())) {
+                        try {
+                            const content = fs.readFileSync(fullPath, 'utf-8');
+                            files.push({ name: relPath, content });
+                        } catch { /* skip unreadable */ }
+                    }
+                }
+            } catch { /* skip inaccessible */ }
+        };
+
+        walk(dir, '');
+        return files;
+    }
 
     private parseCodeFiles(content: string): Array<{ name: string; content: string }> {
         const files: Array<{ name: string; content: string }> = [];

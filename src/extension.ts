@@ -52,6 +52,7 @@ let tts: TTSService;
 let localWhisper: LocalWhisperService;
 let audioSanitizer: AudioSanitizer;
 let currentConversationId: string | null = null;
+let currentCancellationTokenSource: vscode.CancellationTokenSource | null = null;
 
 async function cleanupStaleAudioFiles(logger: Logger) {
 	try {
@@ -311,6 +312,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			const { DebateOrchestrator } = require('./agents/DebateOrchestrator');
 			const orchestrator = new DebateOrchestrator(llmService, logger);
 
+			// Initialize cancellation token
+			currentCancellationTokenSource = new vscode.CancellationTokenSource();
+
 			// Show user message in sidebar chat
 			agentPanel.addMessage('user', `Start SDLC: ${topic}`);
 			agentPanel.showThinking(true);
@@ -325,7 +329,7 @@ export async function activate(context: vscode.ExtensionContext) {
 					const icon = agentIcons[msg.agentId] || '';
 					const roundLabel = msg.type === 'consensus' ? 'CONSENSUS' : `Round ${msg.round}`;
 					agentPanel.addMessage('assistant', `${icon} **${msg.agentId.toUpperCase()}** (${roundLabel}):\n\n${msg.content}`);
-				});
+				}, [], currentCancellationTokenSource.token);
 
 				agentPanel.showThinking(false);
 				agentPanel.addMessage('system', `PRD generated: **${prd.title}**\n\nFiles written to \`.verno/PRD.md\` and \`.verno/prd.json\`.\n\nOpening PRD review panel…`);
@@ -356,6 +360,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		const startBMADCmd = vscode.commands.registerCommand('verno.startBMADAfterSDLC', async (prd: PRDDocument) => {
 			const orchestrator = agentRegistry.get('orchestrator') as OrchestratorAgent;
 			if (orchestrator) {
+				currentCancellationTokenSource = new vscode.CancellationTokenSource();
 				agentPanel.showThinking(true);
 				agentPanel.addMessage('system', '⚙️ **BMAD Pipeline Initiated!** Transferring PRD to agent swarm...');
 
@@ -368,7 +373,7 @@ export async function activate(context: vscode.ExtensionContext) {
 					logger.error('Failed to close SDLC panel', e as Error);
 				}
 
-				await orchestrator.onPRDApproved(prd, context, agentPanel);
+				await orchestrator.onPRDApproved(prd, context, agentPanel, currentCancellationTokenSource.token);
 			}
 		});
 
@@ -596,7 +601,21 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 		});
 
-		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd, processVoiceCmd, newConversationCmd, startSDLCCmd, startBMADCmd, clearApiKeysCmd, saveApiKeyCmd, deleteApiKeyCmd, generateObservabilityCmd, toggleModeCmd, modeToggle, setupJiraCmd, ensureLLMReadyCmd);
+		const stopAgentCmd = vscode.commands.registerCommand('verno.stopAgent', () => {
+			if (currentCancellationTokenSource) {
+				currentCancellationTokenSource.cancel();
+				logger.info('Cancellation requested by user.');
+				vscode.window.showInformationMessage('Verno: Canceling current operation...');
+				if (agentPanel) {
+					agentPanel.addMessage('system', '❌ Operation cancelled by user.');
+					agentPanel.showThinking(false);
+				}
+			} else {
+				vscode.window.showInformationMessage('Verno: No active operation to cancel.');
+			}
+		});
+
+		context.subscriptions.push(processCommand, processWithData, showOutputCmd, recordingStatus, loadConversationCmd, newTaskCmd, mcpInstallCmd, listConvsCmd, deleteConvCmd, voiceConvCmd, processVoiceCmd, newConversationCmd, startSDLCCmd, startBMADCmd, clearApiKeysCmd, saveApiKeyCmd, deleteApiKeyCmd, generateObservabilityCmd, toggleModeCmd, modeToggle, setupJiraCmd, ensureLLMReadyCmd, stopAgentCmd);
 
 		logger.info('Verno extension activated successfully');
 		vscode.window.showInformationMessage('Verno extension is ready!');
@@ -667,6 +686,7 @@ async function processUserInput(
 	options: { fromWebview?: boolean; provider?: string; model?: string } = {}
 ): Promise<void> {
 	try {
+		currentCancellationTokenSource = new vscode.CancellationTokenSource();
 		let apiKey = apiKeyArg;
 		let input = inputArg;
 
@@ -791,6 +811,7 @@ async function processUserInput(
 				onToken: (token: string) => agentPanel.addToken(token)
 			})
 			.build();
+		agentContext.cancellationToken = currentCancellationTokenSource.token;
 
 		// Route to appropriate agent based on mode
 		let result: string;

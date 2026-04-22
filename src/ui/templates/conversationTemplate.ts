@@ -10,13 +10,13 @@ interface VadPaths {
     wasmRoot: string;
 }
 
-export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string {
+export function getConversationHTML(nonce: string, logoUri: string, vadPaths?: VadPaths): string {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net blob:; connect-src vscode-webview-resource: https:; worker-src blob:; media-src vscode-webview-resource: https: blob: mediastream:; font-src https://cdn.jsdelivr.net;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src vscode-webview-resource: https: data: blob:; style-src 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net blob:; connect-src vscode-webview-resource: https:; worker-src blob:; media-src vscode-webview-resource: https: blob: mediastream:; font-src https://cdn.jsdelivr.net;">
     <!-- Marked and Highlight.js for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
@@ -173,7 +173,16 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         .role-box:focus { outline: none; border-color: var(--focus); }
 
         /* CONVERSATION */
-        .conversation { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+        .conversation { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px; position: relative; }
+        
+        /* EMPTY STATE */
+        .empty-state { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; text-align: center; width: 100%; z-index: 10; pointer-events: none; }
+        .es-logo { width: 60px; height: 60px; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-bottom: 16px; overflow: hidden; }
+        .es-logo img { width: 60px; height: 60px; object-fit: contain; }
+        .es-desc { color: #aaaaaa; font-size: 13px; max-width: 260px; line-height: 1.5; margin-bottom: 24px; pointer-events: auto; }
+        .es-btn { display: flex; align-items: center; gap: 8px; border: 1px solid #3a3a3a; color: #4fc3f7; background: transparent; border-radius: 6px; padding: 8px 18px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; pointer-events: auto; font-family: inherit; }
+        .es-btn:hover { background: rgba(79,195,247,0.1); border-color: #4fc3f7; }
+        .es-btn svg { width: 16px; height: 16px; fill: currentColor; }
         .message { display: flex; flex-direction: column; gap: 4px; max-width: 100%; animation: slideInY 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes slideInY { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .message.user { align-self: flex-end; }
@@ -184,6 +193,25 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         .message.assistant .message-bubble { background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
         .message.system .message-bubble { font-size: 12px; opacity: 0.8; background: var(--muted); border-radius: 6px; padding: 6px 12px; box-shadow: none; font-weight: 500; }
 
+        /* CODE BLOCKS IN MESSAGES */
+        .message-bubble pre { background: var(--background); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin: 8px 0; overflow-x: auto; max-width: 100%; }
+        .message-bubble pre code { font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace; font-size: 12px; line-height: 1.5; white-space: pre; word-wrap: normal; overflow-wrap: normal; color: var(--foreground); background: transparent; padding: 0; }
+        .message-bubble code { font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; background: var(--muted); padding: 2px 5px; border-radius: 3px; color: var(--foreground); }
+        .message-bubble pre code { background: transparent; padding: 0; border-radius: 0; }
+        .message-bubble pre::-webkit-scrollbar { height: 6px; }
+        .message-bubble pre::-webkit-scrollbar-track { background: transparent; }
+        .message-bubble pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .message-bubble blockquote { border-left: 3px solid var(--primary); margin: 8px 0; padding: 4px 12px; background: var(--muted); border-radius: 0 4px 4px 0; font-size: 13px; }
+        .message-bubble table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+        .message-bubble th, .message-bubble td { padding: 6px 10px; border: 1px solid var(--border); text-align: left; }
+        .message-bubble th { background: var(--muted); font-weight: 700; }
+        .message-bubble h2, .message-bubble h3 { margin: 12px 0 6px 0; font-size: 14px; }
+        .message-bubble h2 { font-size: 16px; }
+        .message-bubble ul, .message-bubble ol { padding-left: 20px; margin: 4px 0; }
+        .message-bubble li { margin: 2px 0; }
+        .message-bubble p { margin: 4px 0; }
+        .message-bubble img { max-width: 100%; border-radius: 4px; }
+
         /* INPUT */
         .input-area { border-top: 1px solid var(--border); padding: 16px; background: var(--card); display: flex; flex-direction: column; gap: 10px; z-index: 40; }
         textarea { width: 100%; min-height: 60px; max-height: 200px; padding: 12px; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 6px; resize: vertical; font-family: inherit; font-size: 14px; transition: border-color 0.2s; }
@@ -193,10 +221,11 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         .tsel { height: 28px; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 4px; padding: 0 8px; font-size: 11px; cursor: pointer; outline: none; transition: border-color 0.2s; min-width: 120px; }
         .tsel:focus { border-color: var(--focus); }
         .right-ctrl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-left: auto; }
-        .send-btn { height: 28px; padding: 0 16px; background: var(--btn-bg); color: var(--btn-fg); border: none; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.05em; }
-        .sdlc-btn { height: 28px; padding: 0 16px; background: var(--accent); color: var(--accent-foreground); border: none; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.05em; }
+        .send-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: var(--secondary); color: var(--secondary-foreground); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+        .sdlc-btn { height: 28px; padding: 0 16px; background: var(--secondary); color: var(--secondary-foreground); border: 1px solid var(--border); border-radius: 4px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.05em; }
         .send-btn:hover, .sdlc-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
-        .api-key-prompt { display: none; margin-top: 8px; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+        .send-btn svg { width: 14px; height: 14px; fill: currentColor; }
+        
         .api-key-prompt input { margin-top: 6px; width: 100%; padding: 6px 8px; background: var(--input-bg); border: 1px solid var(--border); border-radius: 4px; color: var(--input-fg); font-size: 12px; }
 
         /* CONTEXT BAR */
@@ -206,6 +235,20 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         .ctx-prog { width: 100px; height: 4px; background: var(--muted); border-radius: 2px; overflow: hidden; }
         .ctx-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.3s; }
         .ctx-stats { min-width: 50px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; opacity: 0.8; }
+
+        /* THINKING INDICATOR */
+        .thinking-indicator {
+            display: none; font-size: 12px; opacity: 0.8; margin-left: 10px; padding: 8px 12px;
+            background: var(--muted); border-radius: 6px; align-self: flex-start;
+            align-items: center; gap: 8px; color: var(--fg);
+        }
+        .thinking-indicator.show { display: flex; animation: fadeIn 0.3s; }
+        @keyframes blink { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+        .spinner-dots span { font-weight: bold; font-size: 16px; line-height: 1; animation: blink 1.4s infinite both; }
+        .spinner-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .spinner-dots span:nth-child(3) { animation-delay: 0.4s; }
+        
+        .stop-state { background: var(--destructive) !important; color: var(--destructive-foreground) !important; }
 
         /* ===== VOICE BUTTON ===== */
         @keyframes pulseAccent {
@@ -416,7 +459,19 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
     <div class="ctx-bar" id="ctxBar"><span class="ctx-label">Context</span><div class="ctx-prog"><div class="ctx-fill" id="ctxFill"></div></div><span class="ctx-stats" id="ctxStats">0/32k</span></div>
 
     <!-- CONVERSATION -->
-    <div class="conversation" id="conversation"><div id="thinking" style="display:none;font-size:11px;opacity:0.6;margin-left:10px;">Thinking...</div></div>
+    <div class="conversation" id="conversation">
+        <div class="empty-state" id="emptyState">
+            <div class="es-logo">
+                <img src="${logoUri}" alt="Verno" />
+            </div>
+            <div class="es-desc">Verno has Agile Dev agents ready to work with you. Ask it to build features, fix bugs, or explain your codebase.</div>
+            <button class="es-btn" id="feedbackBtn">
+                <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+                Feedback &amp; Support
+            </button>
+        </div>
+        <div id="thinking" class="thinking-indicator"><div class="spinner-dots"><span>.</span><span>.</span><span>.</span></div>Agent is processing</div>
+    </div>
 
     <!-- VOICE CONVERSATION OVERLAY -->
     <div class="voice-overlay" id="voiceOverlay">
@@ -450,10 +505,10 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         <textarea id="msgInput" placeholder="Type a message..." rows="1"></textarea>
         <div class="toolbar">
             <div class="left-ctrl">
-                <div class="mode-toggle" id="modeToggle">
-                    <div class="mode-opt" data-val="conversational">Conversational</div>
-                    <div class="mode-opt" data-val="development">Development</div>
-                </div>
+                <select id="modeSelect" class="tsel" style="min-width:120px;">
+                    <option value="conversational">Conversational</option>
+                    <option value="development">Development</option>
+                </select>
                 <select id="modelSelect" class="tsel" style="min-width:140px;">
                     <optgroup label="Anthropic">
                         <option value="anthropic:claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
@@ -472,11 +527,13 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
                 </select>
             </div>
             <div class="right-ctrl">
-                <button class="sdlc-btn" id="sdlcBtn" title="Start SDLC Flow (PRD & Jira)">Start SDLC</button>
-                <button class="send-btn" id="sendBtn">Send</button>
+                <button class="sdlc-btn" id="sdlcBtn" title="Start SDLC Flow (PRD & Jira)" style="display:none;">Start SDLC</button>
+                <button class="send-btn" id="sendBtn" title="Send message">
+                    <svg viewBox="0 0 24 24" class="send-icon"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                    <svg viewBox="0 0 24 24" class="stop-icon" style="display:none;"><path d="M6 6h12v12H6z"/></svg>
+                </button>
             </div>
         </div>
-        <div id="apiKeyPrompt" class="api-key-prompt"><div>API Key required for <span id="modelNameDisp">Gemini</span>:</div><input type="password" id="apiKeyInp" placeholder="Enter API Key and press Enter..." /></div>
     </div>
 
     <script nonce="${nonce}">
@@ -555,13 +612,25 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         // Header buttons
         if(btns.newTask) btns.newTask.addEventListener('click',function(){
             vscode.postMessage({type:'newTask'});
-            if(conv&&thinking){while(conv.firstChild&&conv.firstChild!==thinking)conv.removeChild(conv.firstChild);}
-            addMsg('system','New task started.');
+            if(conv&&thinking){
+                var es = document.getElementById('emptyState');
+                Array.from(conv.children).forEach(function(c) {
+                    if (c !== thinking && c !== es) conv.removeChild(c);
+                });
+                if(es) es.style.display = 'flex';
+            }
         });
         if(btns.history) btns.history.addEventListener('click',function(){openPanel('history');});
         if(btns.profile) btns.profile.addEventListener('click',function(){openPanel('profile');});
         if(btns.mcp) btns.mcp.addEventListener('click',function(){openPanel('mcp'); renderMcp('');});
         if(btns.settings) btns.settings.addEventListener('click',function(){openPanel('settings');});
+
+        var feedbackBtn = document.getElementById('feedbackBtn');
+        if (feedbackBtn) {
+            feedbackBtn.addEventListener('click', function() {
+                vscode.postMessage({type: 'openFeedback'});
+            });
+        }
 
         // === PROFILE ===
         function renderProviders(){
@@ -836,26 +905,18 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         if(openLogBtn) openLogBtn.addEventListener('click',function(){vscode.postMessage({type:'showOutput'});});
 
         // === MODE / MODEL ===
-        var modeToggle=document.getElementById('modeToggle');
-        var modeOpts=document.querySelectorAll('.mode-opt');
-        if(modeToggle) {
+        var modeSelect=document.getElementById('modeSelect');
+        if(modeSelect) {
             if(S.mode === 'plan' || S.mode === 'code' || S.mode === 'development') {
                 S.mode = 'development';
             } else {
                 S.mode = 'conversational';
             }
-            modeOpts.forEach(function(o){
-                if(o.getAttribute('data-val') === S.mode) o.classList.add('active');
-                else o.classList.remove('active');
-            });
-            modeOpts.forEach(function(opt) {
-                opt.addEventListener('click', function() {
-                    modeOpts.forEach(function(o){ o.classList.remove('active'); });
-                    opt.classList.add('active');
-                    S.mode = opt.getAttribute('data-val');
-                    save();
-                    updatePlaceholder(S.mode);
-                });
+            modeSelect.value = S.mode;
+            modeSelect.addEventListener('change', function() {
+                S.mode = modeSelect.value;
+                save();
+                updatePlaceholder(S.mode);
             });
         }
         if(modelSelect) {
@@ -867,7 +928,16 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
                 save();checkApiKey();
             });
         }
-        function updatePlaceholder(m){if(!msgInput)return;if(m==='development')msgInput.placeholder='Describe code changes...';else if(m==='conversational')msgInput.placeholder='Ask a question...';else msgInput.placeholder='Type a message...';}
+        function updatePlaceholder(m){
+            if(msgInput) {
+                if(m==='development') msgInput.placeholder='Describe code changes...';
+                else if(m==='conversational') msgInput.placeholder='Ask a question...';
+                else msgInput.placeholder='Type a message...';
+            }
+            var voiceBtnWrap = document.querySelector('.voice-btn-wrap');
+            if(voiceBtnWrap) voiceBtnWrap.style.display = m === 'conversational' ? 'block' : 'none';
+            if(sdlcBtn) sdlcBtn.style.display = m === 'development' ? 'block' : 'none';
+        }
         function checkApiKey(){
             var key=getProviderKey(S.provider || S.model);
             if(!key&&apiKeyPrompt){apiKeyPrompt.style.display='block';var nd=document.getElementById('modelNameDisp');if(nd)nd.textContent=(S.provider||S.model);}
@@ -888,7 +958,13 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         });
 
         // === SEND ===
-        if(sendBtn) sendBtn.addEventListener('click',function(){sendMessage();});
+        if(sendBtn) sendBtn.addEventListener('click',function(){
+            if (sendBtn.classList.contains('stop-state')) {
+                vscode.postMessage({ type: 'stopAgent' });
+            } else {
+                sendMessage();
+            }
+        });
         if(sdlcBtn) sdlcBtn.addEventListener('click',function(){
             var text = msgInput ? msgInput.value.trim() : '';
             var apiKey = getProviderKey(S.provider || S.model);
@@ -916,7 +992,15 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
             var apiKey=getProviderKey(S.provider || S.model);
             if(!apiKey){if(apiKeyPrompt)apiKeyPrompt.style.display='block';if(apiKeyInp)apiKeyInp.focus();addMsg('system','Please add an API key first (use Profile button).');return;}
             addMsg('user',text); msgInput.value=''; msgInput.style.height='auto';
-            if(thinking)thinking.style.display='block';
+            if(thinking)thinking.classList.add('show');
+            if (sendBtn) {
+                var sendIcon = sendBtn.querySelector('.send-icon');
+                var stopIcon = sendBtn.querySelector('.stop-icon');
+                if (sendIcon) sendIcon.style.display = 'none';
+                if (stopIcon) stopIcon.style.display = 'block';
+                sendBtn.classList.add('stop-state');
+                sendBtn.title = 'Stop agent processing';
+            }
             if(conv)conv.scrollTop=conv.scrollHeight;
             var outMode = (S.mode === 'conversational' || S.mode === 'ask') ? 'ask' : 'code';
             vscode.postMessage({type:'processInputSubmit',input:text,apiKey:apiKey,mode:outMode,provider:S.provider,model:S.model});
@@ -925,6 +1009,7 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
         // === MESSAGES ===
         function addMsg(role,content){
             if(!conv||!thinking)return;
+            var es=document.getElementById('emptyState');if(es)es.style.display='none';
             var d=document.createElement('div');d.className='message '+role;
             var b=document.createElement('div');b.className='message-bubble';b.textContent=content;
             d.appendChild(b);conv.insertBefore(d,thinking);conv.scrollTop=conv.scrollHeight;
@@ -950,7 +1035,16 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
                     }
                     break;
                 case 'chatToken':
-                    if(thinking)thinking.style.display='none';
+                    var es=document.getElementById('emptyState');if(es)es.style.display='none';
+                    if(thinking)thinking.classList.remove('show');
+                    if (sendBtn) {
+                        var sendIcon = sendBtn.querySelector('.send-icon');
+                        var stopIcon = sendBtn.querySelector('.stop-icon');
+                        if (sendIcon) sendIcon.style.display = 'block';
+                        if (stopIcon) stopIcon.style.display = 'none';
+                        sendBtn.classList.remove('stop-state');
+                        sendBtn.title = 'Send message';
+                    }
                     if(!window.currentAsstMsg) {
                         var d=document.createElement('div');d.className='message assistant';
                         var b=document.createElement('div');b.className='message-bubble markdown-body';
@@ -971,6 +1065,7 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
                     conv.scrollTop=conv.scrollHeight;
                     break;
                 case 'newMessage': 
+                    var es=document.getElementById('emptyState');if(es)es.style.display='none';
                     var wasStreaming = !!window.currentAsstMsg;
                     window.currentAsstMsg = null;
                     if(m.message) {
@@ -1010,14 +1105,62 @@ export function getConversationHTML(nonce: string, vadPaths?: VadPaths): string 
                            d.appendChild(b);conv.insertBefore(d,thinking);conv.scrollTop=conv.scrollHeight;
                         }
                     } 
-                    if(thinking)thinking.style.display='none'; 
+                    if(thinking)thinking.classList.remove('show');
+                    if (sendBtn) {
+                        var sendIcon = sendBtn.querySelector('.send-icon');
+                        var stopIcon = sendBtn.querySelector('.stop-icon');
+                        if (sendIcon) sendIcon.style.display = 'block';
+                        if (stopIcon) stopIcon.style.display = 'none';
+                        sendBtn.classList.remove('stop-state');
+                        sendBtn.title = 'Send message';
+                    }
                     setTimeout(function(){if(ctxBar)ctxBar.classList.remove('show');},2000); 
                     break;
-                case 'thinking': if(thinking)thinking.style.display=m.show?'block':'none'; break;
+                case 'thinking': 
+                    if(thinking) {
+                        if (m.show) {
+                            thinking.classList.add('show');
+                        } else {
+                            thinking.classList.remove('show');
+                        }
+                    }
+                    if (sendBtn) {
+                        var sendIcon = sendBtn.querySelector('.send-icon');
+                        var stopIcon = sendBtn.querySelector('.stop-icon');
+                        if (m.show) {
+                            if (sendIcon) sendIcon.style.display = 'none';
+                            if (stopIcon) stopIcon.style.display = 'block';
+                            sendBtn.classList.add('stop-state');
+                            sendBtn.title = 'Stop agent processing';
+                        } else {
+                            if (sendIcon) sendIcon.style.display = 'block';
+                            if (stopIcon) stopIcon.style.display = 'none';
+                            sendBtn.classList.remove('stop-state');
+                            sendBtn.title = 'Send message';
+                        }
+                    }
+                    break;
                 case 'contextUsage': if(ctxBar&&ctxFill&&ctxStats){ctxBar.classList.add('show');var pct=Math.min((m.used/m.total)*100,100);ctxFill.style.width=pct+'%';var fk=function(n){return n>=1000?(n/1000).toFixed(1)+'k':''+n;};ctxStats.textContent=fk(m.used)+'/'+fk(m.total);} break;
                 case 'conversationList': renderConvList(m.conversations); break;
-                case 'conversationHistory': if(conv&&thinking){while(conv.firstChild&&conv.firstChild!==thinking)conv.removeChild(conv.firstChild);} if(m.messages)m.messages.forEach(function(msg){addMsg(msg.role,msg.content);}); break;
-                case 'clearConversation': if(conv&&thinking){while(conv.firstChild&&conv.firstChild!==thinking)conv.removeChild(conv.firstChild);} break;
+                case 'conversationHistory': 
+                    if(conv&&thinking){
+                        var es = document.getElementById('emptyState');
+                        Array.from(conv.children).forEach(function(c) {
+                            if (c !== thinking && c !== es) conv.removeChild(c);
+                        });
+                        if (es) es.style.display = 'flex';
+                    }
+                    if(m.messages)m.messages.forEach(function(msg){addMsg(msg.role,msg.content);}); 
+                    break;
+                case 'clearConversation': 
+                    if(conv&&thinking){
+                        var es = document.getElementById('emptyState');
+                        Array.from(conv.children).forEach(function(c) {
+                            if (c !== thinking && c !== es) conv.removeChild(c);
+                        });
+                        if(es) es.style.display = 'flex';
+                    } 
+                    break;
             }
         });
 

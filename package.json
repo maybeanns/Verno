@@ -3,7 +3,7 @@
   "displayName": "Verno — AI SDLC Automation Engine",
   "description": "Voice-first multi-agent AI assistant that automates the full Software Development Life Cycle inside VSCode.",
   "version": "1.0.0",
-  "publisher": "verno-ai",
+  "publisher": "MuhammadAbuzar-dev",
   "repository": {
     "type": "git",
     "url": "https://github.com/maybeanns/Verno"
@@ -11,6 +11,8 @@
   "engines": {
     "vscode": "^1.80.0"
   },
+  "icon": "media/logo.png",
+  "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -134,7 +136,7 @@
         {
           "id": "verno",
           "title": "Verno",
-          "icon": "media/verno-icon.svg",
+          "icon": "media/logo.png",
           "type": "webview"
         }
       ]

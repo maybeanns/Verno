@@ -26,3 +26,6 @@ TROUBLESHOOTING.md
 CONTRIBUTING.md
 changelog.md
 .gitignore
+website/
+scratch/
+*.txt
