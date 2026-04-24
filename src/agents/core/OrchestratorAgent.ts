@@ -122,7 +122,7 @@ export class OrchestratorAgent extends BaseAgent {
     await vscode.commands.executeCommand('verno.startSDLC', topic);
   }
 
-  public async onPRDApproved(prd: PRDDocument, context: vscode.ExtensionContext, agentPanel?: any): Promise<void> {
+  public async onPRDApproved(prd: PRDDocument, context: vscode.ExtensionContext, agentPanel?: any, cancellationToken?: vscode.CancellationToken): Promise<void> {
     this.log('PRD Approved. Triggering BMAD execution pipeline.');
     
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -143,6 +143,7 @@ export class OrchestratorAgent extends BaseAgent {
             agentPanel: agentPanel
         })
         .build();
+    agentContext.cancellationToken = cancellationToken;
 
     try {
         if (agentPanel) {
@@ -153,19 +154,148 @@ export class OrchestratorAgent extends BaseAgent {
         
         if (agentPanel) {
             agentPanel.showThinking(false);
-            agentPanel.addMessage('assistant', `**Plan Output:**\n\n${planOutput}`);
-            agentPanel.addMessage('system', '💻 **Phase 2: Coding** - Handing off to Developer and QA agents...');
+            // Save plan output to log file — don't dump in chat
+            try {
+                const logDir = require('path').join(workspaceRoot, '.verno', 'sdlc-logs');
+                if (!require('fs').existsSync(logDir)) require('fs').mkdirSync(logDir, { recursive: true });
+                require('fs').writeFileSync(require('path').join(logDir, 'plan-output.md'), planOutput, 'utf-8');
+            } catch { /* non-critical */ }
+            agentPanel.addMessage('system', '✅ **Planning complete** — Analysis, architecture, and design documents generated.');
+            agentPanel.addMessage('system', '💻 **Phase 2: Coding** — Handing off to Developer and QA agents...');
             agentPanel.showThinking(true);
         }
 
-        // Automatically shift into CODE mode and execute the coding agents
-        agentContext.metadata!.mode = 'code';
-        const codeOutput = await this.executeCode(agentContext);
+        // Load the plan state that was saved by executePlan, and directly run
+        // the pending coding agents — skip the ambiguous CASE detection in executeCode.
+        if (!this.planStateService) {
+            this.initializeEnhancedServices(workspaceRoot);
+        }
+        const planState = this.planStateService!.loadPlanState();
+        const conversationHistory = (agentContext.metadata?.conversationHistory as string) || '';
+
+        let codeOutput: string;
+        if (planState && planState.pendingSteps.some(id => CODING_PHASE_AGENTS.has(id))) {
+            codeOutput = await this.runPendingCodingAgents(agentContext, planState, conversationHistory);
+        } else {
+            // Fallback: force the developer to run even if plan state is missing
+            this.log('No pending coding steps found in plan state — forcing developer run', 'warn');
+            codeOutput = await this.runEditWithAgentContext(agentContext, planState ?? { agentOutputs: {}, userRequest: agentContext.metadata?.userRequest as string, pendingSteps: [], completedSteps: [], plan: { summary: '', steps: [], includeCodeGeneration: true }, createdAt: Date.now(), updatedAt: Date.now() }, conversationHistory);
+        }
 
         if (agentPanel) {
             agentPanel.showThinking(false);
-            agentPanel.addMessage('assistant', `**Execution Complete:**\n\n${codeOutput}`);
-            agentPanel.addMessage('system', '✅ **BMAD Pipeline Finished!** Your codebase has been updated.');
+            
+            // Save full code output to log file — don't dump in chat
+            try {
+                const logDir = require('path').join(workspaceRoot, '.verno', 'sdlc-logs');
+                if (!require('fs').existsSync(logDir)) require('fs').mkdirSync(logDir, { recursive: true });
+                require('fs').writeFileSync(require('path').join(logDir, 'developer-output.md'), codeOutput, 'utf-8');
+            } catch { /* non-critical */ }
+
+            // Extract the output directory from developer output (if available)
+            let projectOutputDir = '';
+            try {
+                const outputDirMatch = codeOutput.match(/<!-- OUTPUT_DIR: (.+?) -->/);
+                if (outputDirMatch) {
+                    projectOutputDir = outputDirMatch[1].trim();
+                }
+            } catch { /* non-critical */ }
+            const projectDir = projectOutputDir || workspaceRoot;
+            const relProjectDir = projectOutputDir
+                ? require('path').relative(workspaceRoot, projectOutputDir)
+                : '';
+
+            agentPanel.addMessage('system', projectOutputDir
+                ? `✅ **Code generation complete** — Source files written to \`${relProjectDir}\``
+                : '✅ **Code generation complete** — Source files written to workspace.');
+
+            // Read SETUP_INSTRUCTIONS.md if the DeveloperAgent generated it
+            let setupInstructions = '';
+            try {
+                const setupPath = require('path').join(projectDir, 'SETUP_INSTRUCTIONS.md');
+                if (require('fs').existsSync(setupPath)) {
+                    setupInstructions = require('fs').readFileSync(setupPath, 'utf-8');
+                }
+            } catch { /* non-critical */ }
+
+            // Build recursive directory tree
+            let dirTree = '';
+            try {
+                const fsLib = require('fs');
+                const pathLib = require('path');
+                const ignoreDirs = new Set(['.git', '.verno', '.planning', 'node_modules', '.vscode', 'dist', 'build', 'out', 'coverage']);
+                const buildTree = (dir: string, prefix: string, depth: number): string[] => {
+                    if (depth > 3) return ['    ' + prefix + '...'];
+                    const lines: string[] = [];
+                    try {
+                        const entries = fsLib.readdirSync(dir, { withFileTypes: true })
+                            .filter((e: any) => !ignoreDirs.has(e.name) && !e.name.startsWith('.'))
+                            .sort((a: any, b: any) => {
+                                if (a.isDirectory() && !b.isDirectory()) return -1;
+                                if (!a.isDirectory() && b.isDirectory()) return 1;
+                                return a.name.localeCompare(b.name);
+                            });
+                        entries.forEach((entry: any, idx: number) => {
+                            const isLast = idx === entries.length - 1;
+                            const connector = isLast ? '\u2514\u2500\u2500 ' : '\u251C\u2500\u2500 ';
+                            lines.push(prefix + connector + entry.name + (entry.isDirectory() ? '/' : ''));
+                            if (entry.isDirectory()) {
+                                const childPrefix = prefix + (isLast ? '    ' : '\u2502   ');
+                                lines.push(...buildTree(pathLib.join(dir, entry.name), childPrefix, depth + 1));
+                            }
+                        });
+                    } catch { /* skip */ }
+                    return lines;
+                };
+                dirTree = buildTree(projectDir, '', 0).join('\n');
+            } catch { /* non-critical */ }
+
+            // Build agent execution summary from saved logs
+            let agentSummary = '';
+            try {
+                const logDir = require('path').join(workspaceRoot, '.verno', 'sdlc-logs');
+                if (require('fs').existsSync(logDir)) {
+                    const logFiles = require('fs').readdirSync(logDir).filter((f: string) => f.endsWith('.md'));
+                    if (logFiles.length > 0) {
+                        const agentLines = logFiles.map((lf: string) => {
+                            const name = lf.replace('-output.md', '').replace('.md', '');
+                            return '\u2705 ' + name.charAt(0).toUpperCase() + name.slice(1).replace(/-/g, ' ');
+                        });
+                        agentSummary = agentLines.join('\n');
+                    }
+                }
+            } catch { /* non-critical */ }
+
+            // Post-pipeline summary message
+            let summaryMsg = '## \ud83d\udcdd SDLC Pipeline Summary\n\n';
+
+            if (agentSummary) {
+                summaryMsg += '### Agents Executed\n' + agentSummary + '\n\n';
+                summaryMsg += '> Full agent outputs saved to `.verno/sdlc-logs/`\n\n';
+            }
+
+            if (dirTree) {
+                summaryMsg += '### Project Structure\n```\n' + dirTree + '\n```\n\n';
+            }
+
+            if (setupInstructions) {
+                summaryMsg += setupInstructions + '\n\n';
+            } else {
+                const hasPackageJson = require('fs').existsSync(require('path').join(projectDir, 'package.json'));
+                const hasRequirements = require('fs').existsSync(require('path').join(projectDir, 'requirements.txt'));
+                
+                summaryMsg += '### \ud83d\ude80 Quick Start\n';
+                if (hasPackageJson) {
+                    summaryMsg += '```bash\n# Install dependencies\nnpm install\n\n# Start development server\nnpm run dev\n\n# Run tests\nnpm test\n```\n\n';
+                } else if (hasRequirements) {
+                    summaryMsg += '```bash\n# Install dependencies\npip install -r requirements.txt\n\n# Run the application\npython main.py\n```\n\n';
+                }
+            }
+
+            agentPanel.addMessage('assistant', summaryMsg);
+            agentPanel.addMessage('system', projectOutputDir
+                ? `\u2705 **BMAD Pipeline Finished!** Your project is ready in \`${relProjectDir}\``
+                : '\u2705 **BMAD Pipeline Finished!** Your codebase has been updated.');
         }
 
         vscode.window.showInformationMessage('BMAD Pipeline fully completed!');
@@ -253,6 +383,10 @@ export class OrchestratorAgent extends BaseAgent {
       const planningResults: string[] = [];
 
       for (const step of plan.steps) {
+        if (context.cancellationToken?.isCancellationRequested) {
+          throw new Error('Cancelled by user');
+        }
+
         // Skip coding-phase agents — they run in CODE mode
         if (CODING_PHASE_AGENTS.has(step.agentId)) {
           this.log(`Deferring ${step.agentName} to CODE phase`);
@@ -290,8 +424,17 @@ export class OrchestratorAgent extends BaseAgent {
           
           if (panel) {
               panel.showThinking(false);
-              const snippet = output.length > 800 ? output.substring(0, 800) + '...\n\n[Output truncated]' : output;
-              panel.addMessage('assistant', `**${step.agentName} Finished:**\n\n${snippet}`);
+              panel.addMessage('system', `✅ **${step.agentName}** completed`);
+          }
+
+          // Save full output to .verno/sdlc-logs/ instead of dumping in chat
+          if (context.workspaceRoot) {
+              try {
+                  const logDir = require('path').join(context.workspaceRoot, '.verno', 'sdlc-logs');
+                  if (!require('fs').existsSync(logDir)) require('fs').mkdirSync(logDir, { recursive: true });
+                  const logFile = require('path').join(logDir, `${step.agentId}-output.md`);
+                  require('fs').writeFileSync(logFile, `# ${step.agentName} Output\n\n${output}`, 'utf-8');
+              } catch { /* non-critical */ }
           }
           
           planState.agentOutputs[step.agentId] = output;
@@ -373,6 +516,11 @@ export class OrchestratorAgent extends BaseAgent {
 
       // Load plan state
       const planState = this.planStateService?.loadPlanState() ?? null;
+
+      // PRIORITY CHECK: If there are pending coding tasks in the saved plan state,
+      // ALWAYS run them — regardless of whether code files already exist on disk.
+      // This prevents the CASE 5 edit-mode trap when agents have already written
+      // some files (like .ts stubs) but the main project code hasn't been generated.
       const hasPendingTasks = planState && planState.pendingSteps.some(id => CODING_PHASE_AGENTS.has(id));
 
       if (hasPendingTasks && planState) {
@@ -450,6 +598,10 @@ export class OrchestratorAgent extends BaseAgent {
     );
 
     for (const step of pendingCodingSteps) {
+      if (context.cancellationToken?.isCancellationRequested) {
+        throw new Error('Cancelled by user');
+      }
+
       // Skip codereview here — it runs inline after developer (with retry logic)
       if (step.agentId === 'codereview') {
         continue;
@@ -520,8 +672,17 @@ export class OrchestratorAgent extends BaseAgent {
         
         if (panel) {
             panel.showThinking(false);
-            const snippet = output.length > 800 ? output.substring(0, 800) + '...\n\n[Output truncated]' : output;
-            panel.addMessage('assistant', `**${step.agentName} Finished:**\n\n${snippet}`);
+            panel.addMessage('system', `✅ **${step.agentName}** completed`);
+        }
+
+        // Save full output to .verno/sdlc-logs/
+        if (context.workspaceRoot) {
+            try {
+                const logDir = require('path').join(context.workspaceRoot, '.verno', 'sdlc-logs');
+                if (!require('fs').existsSync(logDir)) require('fs').mkdirSync(logDir, { recursive: true });
+                const logFile = require('path').join(logDir, `${step.agentId}-output.md`);
+                require('fs').writeFileSync(logFile, `# ${step.agentName} Output\n\n${output}`, 'utf-8');
+            } catch { /* non-critical */ }
         }
 
         agentOutputs[step.agentId] = output;

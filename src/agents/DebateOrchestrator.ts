@@ -57,7 +57,8 @@ export class DebateOrchestrator {
     public async runDebate(
         topic: string,
         onMessage: (msg: DebateMessage) => void,
-        previousMessages: DebateMessage[] = []
+        previousMessages: DebateMessage[] = [],
+        cancellationToken?: vscode.CancellationToken
     ): Promise<PRDDocument> {
         this.logger.info(`[DebateOrchestrator] Starting 8-agent debate: "${topic}"`);
 
@@ -66,8 +67,10 @@ export class DebateOrchestrator {
 
         // ── Phase A: Multi-round debate ────────────────────────────────────
         for (let round = 1; round <= numRounds; round++) {
+            if (cancellationToken?.isCancellationRequested) { throw new Error('Cancelled by user'); }
             this.logger.info(`  Round ${round}/${numRounds}`);
             for (const agent of DEBATE_AGENTS) {
+                if (cancellationToken?.isCancellationRequested) { throw new Error('Cancelled by user'); }
                 const prompt = this.buildPrompt(topic, agent.id, agent.role, history, round);
                 const response = await this.llmService.generateText(prompt);
 
@@ -84,6 +87,7 @@ export class DebateOrchestrator {
         }
 
         // ── Phase B: Convergence / PM consensus ───────────────────────────
+        if (cancellationToken?.isCancellationRequested) { throw new Error('Cancelled by user'); }
         this.logger.info('  Convergence phase');
         const convergencePrompt = `You are the Product Manager who has chaired the debate.
 The 3-round debate among the 8 BMAD agents (including the Security Engineer) has concluded.
@@ -108,6 +112,7 @@ Keep it concise but authoritative (max 250 words).`;
         onMessage(convergenceMsg);
 
         // ── Phase C: PRD generation ────────────────────────────────────────
+        if (cancellationToken?.isCancellationRequested) { throw new Error('Cancelled by user'); }
         this.logger.info('  PRD generation');
         const prdPrompt = `You are a Technical Product Manager. Based on the following debate and executive summary, generate a formal Product Requirements Document (PRD).
 

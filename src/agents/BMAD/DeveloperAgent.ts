@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { EventEmitter } from 'events';
+import { VernoArtifactService } from '../../services/artifact/VernoArtifactService';
 
 const exec = util.promisify(childProcess.exec);
 
@@ -75,7 +76,7 @@ class TerminalSession extends EventEmitter {
   private cwd: string;
   private SENTINEL = '__CMD_DONE__';
 
-  constructor(cwd: string, private log: (msg: string) => void = () => {}) {
+  constructor(cwd: string, private log: (msg: string) => void = () => { }) {
     super();
     this.cwd = cwd;
   }
@@ -280,8 +281,11 @@ export class DeveloperAgent extends BaseAgent {
   /** Persistent PTY shell ΓÇö stays alive for the whole execute() call */
   private terminal?: TerminalSession;
 
-  /** Detected project environment ΓÇö cached after first detection */
+  /** Detected project environment — cached after first detection */
   private env?: ProjectEnv;
+
+  /** Resolved output directory for the generated project */
+  private outputDir?: string;
 
   constructor(
     protected logger: any,
@@ -307,19 +311,24 @@ export class DeveloperAgent extends BaseAgent {
   // ΓöÇΓöÇ Main entry point ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
   async execute(context: IAgentContext): Promise<string> {
-    this.log('≡ƒÜÇ Developer Agent (Amelia) ΓÇö Claude Code-level execution starting');
+    this.log('🚀 Developer Agent (Amelia) — Claude Code-level execution starting');
 
     if (context.workspaceRoot) {
       this.feedbackService = new FeedbackService(context.workspaceRoot);
 
-      // Open persistent terminal session
-      this.terminal = new TerminalSession(context.workspaceRoot, (msg) => this.log(msg));
-      await this.terminal.open();
-      this.log('Γ£à Terminal session opened');
+      // ── Resolve dedicated output directory for the generated project ──
+      const userRequest = (context.metadata?.userRequest as string) || '';
+      this.outputDir = this.resolveOutputDir(context.workspaceRoot, userRequest);
+      this.log(`📁 Output directory: ${this.outputDir}`);
 
-      // Detect project environment ONCE upfront
-      this.env = await this.detectProjectEnvironment(context.workspaceRoot);
-      this.log(`≡ƒôª Environment: ${JSON.stringify(this.env)}`);
+      // Open persistent terminal session IN the output directory
+      this.terminal = new TerminalSession(this.outputDir, (msg) => this.log(msg));
+      await this.terminal.open();
+      this.log('✅ Terminal session opened');
+
+      // Detect project environment ONCE upfront — check output dir
+      this.env = await this.detectProjectEnvironment(this.outputDir);
+      this.log(`📊 Environment: ${JSON.stringify(this.env)}`);
     }
 
     const MAX_RETRIES = 5;
@@ -376,7 +385,10 @@ export class DeveloperAgent extends BaseAgent {
           : '';
 
         const detectedLang = this.detectLanguage(userRequest);
-        const hasExistingCode = existingFilesContext.length > 50;
+        // Only consider it existing code if RAG found actual source files (not just .md docs)
+        const hasActualSourceCode = existingFilesContext.length > 200 &&
+          /\.(ts|js|tsx|jsx|py|java|go|rs|rb|php|css|html)/.test(existingFilesContext);
+        const hasExistingCode = hasActualSourceCode;
 
         // ΓöÇΓöÇ Build prompt ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         const errorContext = attempt > 1
@@ -398,6 +410,40 @@ export class DeveloperAgent extends BaseAgent {
           await this.llmService.streamGenerate(prompt, undefined, (token: string) => {
             buffer += token;
           });
+
+          // ── Multi-turn continuation for truncated responses ─────────────
+          const MAX_CONTINUATIONS = 5;
+          for (let cont = 0; cont < MAX_CONTINUATIONS; cont++) {
+            const openFences = (buffer.match(/```/g) || []).length;
+            const hasOddFences = openFences % 2 !== 0;
+            const hasSetupInstructions = buffer.includes('FILE: SETUP_INSTRUCTIONS.md') || buffer.includes('FILE: README.md');
+            const endsAbruptly = (buffer.trimEnd().length > 100 && hasOddFences) ||
+              (buffer.trimEnd().length > 500 && !hasSetupInstructions && cont === 0);
+
+            if (!endsAbruptly) break;
+
+            this.log(`Output truncated (${openFences} fences). Continuation ${cont + 1}/${MAX_CONTINUATIONS}...`);
+
+            const tail = buffer.substring(Math.max(0, buffer.length - 2000));
+            const contPrompt = `Your previous output was cut off mid-file. Here is the tail:\n\n${tail}\n\nContinue EXACTLY where you left off. Do NOT repeat already-generated files. Use the same format:\n\n\\\`\\\`\\\`FILE: path/to/file.ext\n...content...\n\\\`\\\`\\\``;
+
+            try {
+              let continuation = '';
+              await this.llmService.streamGenerate(contPrompt, undefined, (token: string) => {
+                continuation += token;
+              });
+              if (continuation.trim().length > 20) {
+                buffer += '\n' + continuation;
+                this.log(`Continuation ${cont + 1}: +${continuation.length} chars`);
+              } else {
+                break;
+              }
+            } catch (contErr: any) {
+              this.log(`Continuation failed: ${contErr.message}`, 'warn');
+              break;
+            }
+          }
+
           completedTasks.push(`Code generated (attempt ${attempt})`);
           finalBuffer = buffer;
         } catch (err: any) {
@@ -408,34 +454,92 @@ export class DeveloperAgent extends BaseAgent {
 
         if (!context.workspaceRoot) break;
 
-        // ΓöÇΓöÇ File writing ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        // Use the resolved output directory for all file operations
+        const projectRoot = this.outputDir || context.workspaceRoot;
+
+        // ── File writing ───────────────────────────────────────
         const generatedFiles = this.parseCodeFiles(buffer);
         this.log(`Parsed ${generatedFiles.length} file(s) from LLM output`);
 
         // Pre-validate TypeScript/JavaScript before writing
-        const preValidationIssues = await this.preValidateFiles(generatedFiles, context.workspaceRoot);
+        const preValidationIssues = await this.preValidateFiles(generatedFiles, projectRoot);
         if (preValidationIssues.length > 0) {
           issues.push(...preValidationIssues);
-          this.log(`Pre-validation found ${preValidationIssues.length} issue(s) ΓÇö will include in retry context`);
+          this.log(`Pre-validation found ${preValidationIssues.length} issue(s) — will include in retry context`);
         }
 
-        await this.writeFiles(generatedFiles, context.workspaceRoot, completedTasks, issues);
+        // Filter out planning artifacts that the LLM should NOT have generated
+        // Post-parse validation: detect framework mixing and bad patterns
+        const hasNextFiles = generatedFiles.some(f => f.name.includes('app/layout') || f.name.includes('next.config'));
+        const hasReactRouter = generatedFiles.some(f => f.content.includes('react-router-dom') || f.content.includes('BrowserRouter'));
+        const hasReactDOMRender = generatedFiles.some(f => f.content.includes('ReactDOM.render') || f.content.includes('createRoot'));
 
-        // ΓöÇΓöÇ Reconcile manifests ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-        await this.reconcileManifests(context.workspaceRoot, buffer, issues, suggestions);
+        if (hasNextFiles && hasReactRouter) {
+          this.log('⚠️ WARNING: Next.js project uses react-router-dom — stripping bad imports');
+          for (const f of generatedFiles) {
+            if (f.content.includes('react-router-dom')) {
+              f.content = f.content.replace(/import.*from\s+['"]react-router-dom['"];?/g, '// Removed: react-router-dom (use next/link instead)');
+            }
+          }
+        }
 
-        // ΓöÇΓöÇ Install dependencies ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-        await this.installDependencies(context.workspaceRoot, completedTasks, issues, suggestions);
+        // Filter out CRA patterns in Next.js projects
+        if (hasNextFiles) {
+          const craPatterns = ['app/index.tsx', 'app/App.tsx', 'app/routes.tsx', 'app/index.jsx', 'app/App.jsx'];
+          const beforeCount = generatedFiles.length;
+          const filtered = generatedFiles.filter(f => {
+            if (craPatterns.some(p => f.name.endsWith(p))) {
+              this.log(`⚠️ Filtered CRA pattern file from Next.js project: ${f.name}`);
+              return false;
+            }
+            return true;
+          });
+          generatedFiles.length = 0;
+          generatedFiles.push(...filtered);
+        }
 
-        // ΓöÇΓöÇ Quality gates (parallel where safe) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-        await this.runQualityGates(context.workspaceRoot, completedTasks, issues, suggestions);
+        // Warn about truncated filenames
+        for (const f of generatedFiles) {
+          const basename = f.name.split('/').pop() || '';
+          if (basename.length <= 4 && basename.includes('.')) {
+            this.log(`⚠️ WARNING: Suspiciously short filename: ${f.name} — may be truncated`);
+          }
+        }
 
-        // ΓöÇΓöÇ Security scan ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-        await this.runSecurityScan(context.workspaceRoot, completedTasks, issues, suggestions);
 
-        // ΓöÇΓöÇ Git snapshot ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        const PLANNING_ARTIFACTS = new Set([
+          'ANALYSIS.md', 'ARCHITECTURE.md', 'UX_DESIGN.md', 'PRD.md',
+          'QA_PLAN.md', 'CODE_REVIEW.md', 'analysis.md', 'architecture.md',
+          'ux_design.md', 'prd.md', 'qa_plan.md', 'code_review.md',
+        ]);
+        const codeFiles = generatedFiles.filter(f => {
+          const basename = f.name.split('/').pop() || f.name;
+          if (PLANNING_ARTIFACTS.has(basename)) {
+            this.log(`⚠️ Filtered out planning artifact from code output: ${f.name}`);
+            return false;
+          }
+          return true;
+        });
+        this.log(`📦 ${codeFiles.length} actual code files to write (filtered ${generatedFiles.length - codeFiles.length} planning artifacts)`);
+
+        await this.writeFiles(codeFiles, projectRoot, completedTasks, issues);
+
+
+        // ── Reconcile manifests ──────────────────────────────
+        await this.reconcileManifests(projectRoot, buffer, issues, suggestions);
+
+        // ── Install dependencies ─────────────────────────────
+        await this.installDependencies(projectRoot, completedTasks, issues, suggestions);
+
+        // ── Quality gates (parallel where safe) ──────────────
+        await this.runQualityGates(projectRoot, completedTasks, issues, suggestions);
+
+        // ── Security scan ────────────────────────────────────
+        await this.runSecurityScan(projectRoot, completedTasks, issues, suggestions);
+
+        // ── Git snapshot ─────────────────────────────────────
         if (this.env?.hasGit) {
-          await this.gitSnapshot(context.workspaceRoot, `Amelia: ${userRequest.substring(0, 72)}`);
+          await this.gitSnapshot(projectRoot, `Amelia: ${userRequest.substring(0, 72)}`);
         }
 
         // Save implementation reference
@@ -443,18 +547,18 @@ export class DeveloperAgent extends BaseAgent {
         await this.safeWriteFile(implPath, buffer);
         this.changeTracker.recordChange(implPath, buffer);
 
-        // ΓöÇΓöÇ Self-healing check ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        // ── Self-healing check ─────────────────────────────────
         const fatals = issues.filter(i => i.severity === 'high' || i.severity === 'critical');
         if (fatals.length === 0) {
-          this.log(`Attempt ${attempt} succeeded ΓÇö no fatal issues`);
+          this.log(`Attempt ${attempt} succeeded — no fatal issues`);
           break;
         }
 
         const autoFixable = fatals.filter(i => i.autoFixed);
-        this.log(`≡ƒöº ${fatals.length} fatal(s), ${autoFixable.length} auto-fixed. Retrying...`);
+        this.log(`🔺 ${fatals.length} fatal(s), ${autoFixable.length} auto-fixed. Retrying...`);
 
         if (attempt === MAX_RETRIES) {
-          this.log('Max retries reached ΓÇö proceeding with remaining issues');
+          this.log('Max retries reached — proceeding with remaining issues');
         }
       }
 
@@ -465,7 +569,63 @@ export class DeveloperAgent extends BaseAgent {
     }
 
     this.generateFeedback(completedTasks, issues, suggestions, context.workspaceRoot);
-    return finalBuffer;
+
+    // Return the final output with the output directory path so orchestrator knows where files went
+    const outputMarker = this.outputDir ? `\n\n<!-- OUTPUT_DIR: ${this.outputDir} -->` : '';
+    return finalBuffer + outputMarker;
+  }
+
+
+  // ══════════════════════════════════════════════════════════════════════
+  // Output Directory Resolution
+  // ══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Resolves a dedicated output directory for the generated project.
+   * Creates a clean, visible folder at the workspace root named after the project.
+   * e.g. workspaceRoot/shoe-store/
+   */
+  private resolveOutputDir(workspaceRoot: string, userRequest: string): string {
+    // Try to get project name from PRD
+    let projectName = '';
+    try {
+      const artifacts = new VernoArtifactService(workspaceRoot);
+      const prd = artifacts.readJSON<{ title?: string }>('prd.json');
+      if (prd?.title) {
+        projectName = prd.title;
+      }
+    } catch { /* PRD not available */ }
+
+    // Fallback: derive from user request
+    if (!projectName) {
+      const words = userRequest
+        .replace(/\[.*?\]/g, '')
+        .replace(/please|implement|create|build|make|the|a|an|for|with|features|described|in|this/gi, '')
+        .trim()
+        .split(/\s+/)
+        .filter(w => w.length > 1)
+        .slice(0, 4);
+      projectName = words.join(' ') || 'generated-project';
+    }
+
+    // Slugify: "Shoe E-Commerce Store" => "shoe-ecommerce-store"
+    const folderName = projectName
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .substring(0, 50)
+      || 'generated-project';
+
+    // Place the project folder directly at the workspace root
+    const outputDir = path.join(workspaceRoot, folderName);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    this.log(`📁 Project output directory: ${outputDir}`);
+    return outputDir;
   }
 
   // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
@@ -483,20 +643,20 @@ export class DeveloperAgent extends BaseAgent {
     const isWin = process.platform === 'win32';
     const exists = (p: string) => fs.existsSync(path.join(workspaceRoot, p));
     const findFiles = (pattern: string) => {
-        try {
-            const files = fs.readdirSync(workspaceRoot);
-            if (pattern.startsWith('*.')) {
-                const ext = pattern.slice(1);
-                return files.some(f => f.endsWith(ext));
-            }
-            return files.includes(pattern);
-        } catch { return false; }
+      try {
+        const files = fs.readdirSync(workspaceRoot);
+        if (pattern.startsWith('*.')) {
+          const ext = pattern.slice(1);
+          return files.some(f => f.endsWith(ext));
+        }
+        return files.includes(pattern);
+      } catch { return false; }
     };
     const binExists = async (bin: string) => {
-      try { 
-          const cmd = isWin ? `where ${bin}` : `which ${bin}`;
-          await exec(cmd); 
-          return true; 
+      try {
+        const cmd = isWin ? `where ${bin}` : `which ${bin}`;
+        await exec(cmd);
+        return true;
       } catch { return false; }
     };
 
@@ -684,7 +844,30 @@ export class DeveloperAgent extends BaseAgent {
     issues: IssueRecord[]
   ): Promise<void> {
     for (const file of files) {
-      const filePath = path.join(workspaceRoot, file.name);
+      // Strip output folder name from file paths if the LLM included it
+      // e.g. "prd-ecommerce-website-for-furniture/src/main.ts" -> "src/main.ts"
+      let cleanName = file.name;
+      if (this.outputDir) {
+        const outputFolderName = require('path').basename(this.outputDir);
+        if (cleanName.startsWith(outputFolderName + '/') || cleanName.startsWith(outputFolderName + '\\')) {
+          cleanName = cleanName.substring(outputFolderName.length + 1);
+          this.log(`Stripped folder prefix from path: ${file.name} -> ${cleanName}`);
+        }
+      }
+      const filePath = path.join(workspaceRoot, cleanName);
+
+      // Strip git merge conflict markers from file content
+      if (file.content.includes('<<<<') || file.content.includes('>>>>')) {
+        const cleanedContent = file.content
+          .replace(/^<<<<.*$/gm, '')
+          .replace(/^====.*$/gm, '')
+          .replace(/^>>>>.*$/gm, '')
+          .replace(/\n{3,}/g, '\n\n');
+        if (cleanedContent.trim() !== file.content.trim()) {
+          this.log(`⚠️ Stripped merge conflict markers from: ${cleanName}`);
+          file.content = cleanedContent;
+        }
+      }
 
       // Ensure parent directories exist
       const dir = path.dirname(filePath);
@@ -1466,6 +1649,24 @@ ${docs.auxiliary ? `### ADDITIONAL INTELLIGENCE\n${docs.auxiliary}\n` : ''}
 ${conversationHistory ? `## CONVERSATION HISTORY\n${conversationHistory.substring(0, 1500)}\n` : ''}
 ${errorContext}
 
+## CRITICAL — WHAT YOU MUST OUTPUT
+You are a CODE GENERATOR. Your job is to output RUNNABLE APPLICATION SOURCE CODE.
+Pick ONE project structure template below that best matches the request. Do NOT combine multiple templates.
+
+DO NOT output:
+- ANALYSIS.md, ARCHITECTURE.md, UX_DESIGN.md, or any planning documents
+- Documents that describe what to build — those are your INPUTS, not outputs
+- Summaries, analyses, or requirement restatements
+
+DO output:
+- package.json (with all dependencies)
+- Source code files (HTML, CSS, JS/TS, etc.)
+- Configuration files (tsconfig.json, vite.config.ts, .env.example, etc.)
+- Test files with real assertions
+- SETUP_INSTRUCTIONS.md (the only .md you should generate)
+
+The ANALYSIS, ARCHITECTURE, PRD, and UX_DESIGN sections above are your INPUT context. Read them, then generate the actual application code that implements them.
+
 ## IMPLEMENTATION RULES
 1. Generate FULLY COMPLETE, WORKING code ΓÇö no stubs, no TODOs, no placeholders.
 2. Every function must have a complete implementation.
@@ -1475,9 +1676,21 @@ ${errorContext}
 6. Write at least one test file with meaningful tests.
 7. Handle errors properly ΓÇö never swallow exceptions silently.
 8. Use TypeScript strict mode when writing TypeScript.
-${docs.ux ? `9. UI MUST be visually styled per the UX Design Specification above. NO blank/unstyled HTML structures.\n` : ''}
-${docs.prd ? `10. Every feature and acceptance criterion in the PRD MUST be implemented.\n` : ''}
-${detectedLang ? `11. ONLY use ${detectedLang}. Do not introduce other languages.\n` : ''}
+${docs.ux ? `9. UI MUST be visually styled per the UX Design Specification above. NO blank/unstyled HTML structures.\\n` : ''}
+${docs.prd ? `10. Every feature and acceptance criterion in the PRD MUST be implemented.\\n` : ''}
+${detectedLang ? `11. ONLY use ${detectedLang}. Do not introduce other languages.\\n` : ''}
+
+
+
+## RULES — MANDATORY
+1. Pick ONE architecture matching the project. Do NOT combine multiple patterns.
+2. If using Next.js App Router: put pages in app/, use next/link (NOT react-router-dom), add "use client" to components with hooks/events, include postcss.config.js when using Tailwind, globals.css MUST have @tailwind directives and be imported in layout.tsx.
+3. If using Express/NestJS backend: include controllers with real route handlers, models with real schemas, middleware with real logic. Every service must make real API calls.
+4. Every file must have a COMPLETE implementation — no stubs, no TODOs, no empty function bodies.
+5. package.json must list ALL dependencies the code imports. Do NOT include phantom packages that don't exist on npm.
+6. layout.tsx MUST have <html>, <body>, {children}, metadata, and font loading.
+7. Generate ALL pages, components, services, and config files — not just 3-4 skeleton files.
+8. Use proper styling (Tailwind classes or CSS) on every component — no bare unstyled HTML.
 
 ## OUTPUT FORMAT ΓÇö MANDATORY
 Each file MUST be wrapped like this:
@@ -1486,7 +1699,33 @@ Each file MUST be wrapped like this:
 ...complete file content...
 \`\`\`
 
-Output ALL files using this format. Never describe what you would do ΓÇö write the actual code.`;
+Output ALL files using this format. Never describe what you would do — write the actual code.
+
+CRITICAL: All file paths MUST be relative to the project root directory.
+- GOOD: \`src/app.ts\`, \`package.json\`, \`public/index.html\`
+- BAD: \`/home/user/project/src/app.ts\`, \`.verno/projects/foo/src/app.ts\`
+- BAD: Do NOT include the project folder name in paths. Write \`src/main.ts\`, NOT \`my-project/src/main.ts\`
+## POST-GENERATION SUMMARY ΓÇö MANDATORY
+After all file blocks, you MUST output a final file:
+
+\`\`\`FILE: SETUP_INSTRUCTIONS.md
+# Project Setup & Run Instructions
+
+## Directory Structure
+(Describe what each top-level folder/file does in a markdown table)
+
+## Prerequisites
+(List required tools: Node.js version, npm/yarn, database, etc.)
+
+## Installation
+(Exact shell commands to install dependencies)
+
+## Running the Application
+(Exact commands to start dev server, build for production, run tests)
+
+## Environment Variables
+(List all required env vars with descriptions)
+\`\`\``;
   }
 
   private buildEditPrompt(

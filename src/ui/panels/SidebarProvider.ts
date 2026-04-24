@@ -13,7 +13,7 @@ const SIDEBAR_ALLOWED_TYPES = [
     'processInputSubmit', 'start-sdlc', 'newTask', 'listConversations',
     'loadConversation', 'deleteConversation', 'mcpInstall', 'triggerUpload',
     'startRecording', 'vadAudioData', 'stopRecording', 'voiceConversationComplete',
-    'voiceSessionEnded', 'log', 'showOutput', 'webviewReady', 'saveApiKey', 'deleteApiKey'
+    'voiceSessionEnded', 'log', 'showOutput', 'webviewReady', 'saveApiKey', 'deleteApiKey', 'openFeedback'
 ] as const;
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
@@ -66,6 +66,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'newTask':
                     await vscode.commands.executeCommand('verno.newTask');
+                    break;
+                case 'openFeedback':
+                    vscode.env.openExternal(vscode.Uri.parse('https://github.com/maybeanns/Verno/issues'));
                     break;
                 case 'listConversations':
                     await vscode.commands.executeCommand('verno.listConversations');
@@ -338,7 +341,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             wasmRoot: webview.asWebviewUri(vscode.Uri.file(path.join(this.context.extensionPath, 'media', 'vad'))).toString() + '/'
         };
 
-        return getConversationHTML(nonce, vadPaths);
+        const logoUri = webview.asWebviewUri(vscode.Uri.file(path.join(this.context.extensionPath, 'media', 'logo.png'))).toString();
+
+        return getConversationHTML(nonce, logoUri, vadPaths);
     }
 }
 

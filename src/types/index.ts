@@ -8,12 +8,15 @@ export interface IAgent {
   execute(context: IAgentContext): Promise<string>;
 }
 
+import * as vscode from 'vscode';
+
 export interface IAgentContext {
   workspaceRoot: string;
   selectedText?: string;
   filePath?: string;
   fileContent?: string;
   metadata?: Record<string, unknown>;
+  cancellationToken?: vscode.CancellationToken;
 }
 
 export interface IWorkflowStep {
