@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Mic, MicOff, Globe, Lock, Paperclip, Settings,
-    ChevronDown, ChevronRight, X, Key, Server, Check
+    ChevronDown, ChevronRight, X, Key, Server, Check,
+    Terminal, FileText, Layers, Workflow
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
@@ -13,8 +14,41 @@ import { loadSettings, type SettingsData } from './SettingsPanel';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const PROJECT_TYPES: ProjectType[] = [
-    'Full Stack App', 'Mobile App', 'Landing Page', 'Dashboard', 'Chrome Extension'
+    'Full Stack App', 'Mobile App', 'Landing Page', 'Dashboard', 'Portfolio'
 ];
+
+type OperationalMode = 'Generate PRD' | 'Plan' | 'Develop' | 'SDLC';
+const OPERATIONAL_MODES: OperationalMode[] = ['Generate PRD', 'Plan', 'Develop', 'SDLC'];
+
+const MODE_ICONS: Record<OperationalMode, React.ReactNode> = {
+    'Generate PRD': <FileText className="w-4 h-4" />,
+    'Plan': <Layers className="w-4 h-4" />,
+    'Develop': <Terminal className="w-4 h-4" />,
+    'SDLC': <Workflow className="w-4 h-4" />
+};
+
+const PROJECT_TYPE_DETAILS: Record<ProjectType, { placeholder: string, agents: string[] }> = {
+    'Full Stack App': {
+        placeholder: "Build me an e-commerce platform with...",
+        agents: ["Product Owner", "Scrum Master", "Backend Developer", "Frontend Developer", "Full Stack Developer", "UI/UX Designer", "QA Engineer"]
+    },
+    'Mobile App': {
+        placeholder: "Design a fitness tracking mobile app with...",
+        agents: ["Product Owner", "Scrum Master", "Mobile Developer (Lead)", "Mobile Developer", "Backend API Developer", "UI/UX Designer", "Mobile QA Engineer"]
+    },
+    'Landing Page': {
+        placeholder: "Create a high-converting landing page for a SaaS product...",
+        agents: ["Product Owner / Marketing Lead", "UI/UX Designer", "Frontend Developer", "Copywriter", "QA / Analytics Tester"]
+    },
+    'Dashboard': {
+        placeholder: "Build an admin dashboard with charts and tables...",
+        agents: ["Product Owner", "Frontend Developer", "Backend Developer", "UI/UX Designer", "QA Engineer"]
+    },
+    'Portfolio': {
+        placeholder: "Design a personal portfolio website for a photographer...",
+        agents: ["Product Owner", "UI/UX Designer", "Frontend Developer", "Content Strategist / Copywriter"]
+    }
+};
 
 interface ModelOption {
     id: string;
@@ -67,22 +101,114 @@ function SettingsContent({
     onChange,
     onSave,
     saved,
+    selectedType,
 }: {
     settings: SettingsData;
     onChange: (k: keyof SettingsData, v: string) => void;
     onSave: () => void;
     saved: boolean;
+    selectedType: ProjectType;
 }) {
     return (
         <div className="p-4 space-y-5">
+            {/* Project Agents */}
+            <section className="space-y-3">
+                <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    <Layers className="w-3 h-3" /> Pre-assigned Agents for {selectedType}
+                </div>
+                <div className="flex flex-wrap gap-1.5 opacity-80">
+                    {PROJECT_TYPE_DETAILS[selectedType].agents.map((agent, idx) => (
+                        <span key={idx} className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-medium border border-primary/20">
+                            {agent}
+                        </span>
+                    ))}
+                </div>
+            </section>
+            
+            <div className="h-px bg-border/60" />
+
             {/* API Keys */}
             <section className="space-y-3">
                 <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    <Key className="w-3 h-3" /> API Keys
+                    <Key className="w-3 h-3" /> Model Selection & API Keys
                 </div>
-                <SettingInput label="Groq API Key" placeholder="gsk_..." value={settings.groqKey} onChange={v => onChange('groqKey', v)} hint="Free at console.groq.com — Llama, Qwen, Kimi" />
-                <SettingInput label="OpenAI API Key" placeholder="sk-..." value={settings.openaiKey} onChange={v => onChange('openaiKey', v)} />
-                <SettingInput label="Anthropic API Key" placeholder="sk-ant-..." value={settings.anthropicKey} onChange={v => onChange('anthropicKey', v)} />
+                
+                <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-foreground/70">Preferred Model Provider</label>
+                    <select 
+                        value={settings.preferredModel} 
+                        onChange={(e) => onChange('preferredModel', e.target.value)}
+                        className="w-full px-3 py-1.5 bg-muted/60 border border-border rounded-lg text-xs text-foreground outline-none focus:ring-1 focus:ring-primary/30"
+                    >
+                        <option value="Groq">Groq (Multi-model)</option>
+                        <option value="OpenAI">OpenAI</option>
+                        <option value="Qwen">Qwen</option>
+                        <option value="Mistral AI">Mistral AI</option>
+                        <option value="Google">Google (Gemini)</option>
+                        <option value="Moonshot AI">Moonshot AI (Kimi)</option>
+                        <option value="MiniMax">MiniMax</option>
+                        <option value="DeepSeek">DeepSeek</option>
+                    </select>
+                </div>
+
+                {settings.preferredModel === 'Groq' && (
+                    <>
+                        <div className="space-y-1">
+                            <label className="text-[11px] font-medium text-foreground/70">Groq Model</label>
+                            <select 
+                                value={settings.groqModel || 'llama-3.3-70b-versatile'} 
+                                onChange={(e) => onChange('groqModel', e.target.value)}
+                                className="w-full px-3 py-1.5 bg-muted/60 border border-border rounded-lg text-xs text-foreground outline-none focus:ring-1 focus:ring-primary/30"
+                            >
+                                <optgroup label="Alibaba Cloud">
+                                    <option value="qwen-2.5-32b">qwen/qwen3-32b (via Groq)</option>
+                                </optgroup>
+                                <optgroup label="Canopy Labs">
+                                    <option value="orpheus-arabic-saudi">canopylabs/orpheus-arabic-saudi</option>
+                                    <option value="orpheus-v1-english">canopylabs/orpheus-v1-english</option>
+                                </optgroup>
+                                <optgroup label="Groq">
+                                    <option value="compound">groq/compound</option>
+                                    <option value="compound-mini">groq/compound-mini</option>
+                                </optgroup>
+                                <optgroup label="Meta">
+                                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+                                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+                                    <option value="llama-4-scout-17b-16e-i">meta-llama/llama-4-scout-17b-16e-i...</option>
+                                    <option value="llama-prompt-guard-2-2">meta-llama/llama-prompt-guard-2-2...</option>
+                                    <option value="llama-prompt-guard-2-8">meta-llama/llama-prompt-guard-2-8...</option>
+                                </optgroup>
+                                <optgroup label="OpenAI (OSS)">
+                                    <option value="gpt-oss-120b">openai/gpt-oss-120b</option>
+                                    <option value="gpt-oss-20b">openai/gpt-oss-20b</option>
+                                    <option value="gpt-oss-safeguard-20b">openai/gpt-oss-safeguard-20b</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <SettingInput label="Groq API Key" placeholder="gsk_..." value={settings.groqKey} onChange={v => onChange('groqKey', v)} hint="Free at console.groq.com" />
+                    </>
+                )}
+                {settings.preferredModel === 'OpenAI' && (
+                    <SettingInput label="OpenAI API Key" placeholder="sk-..." value={settings.openaiKey} onChange={v => onChange('openaiKey', v)} />
+                )}
+                {settings.preferredModel === 'Qwen' && (
+                    <SettingInput label="Qwen API Key" placeholder="sk-..." value={settings.qwenKey} onChange={v => onChange('qwenKey', v)} />
+                )}
+                {settings.preferredModel === 'Mistral AI' && (
+                    <SettingInput label="Mistral API Key" placeholder="..." value={settings.mistralKey} onChange={v => onChange('mistralKey', v)} />
+                )}
+                {settings.preferredModel === 'Google' && (
+                    <SettingInput label="Google Gemini API Key" placeholder="AIza..." value={settings.googleKey} onChange={v => onChange('googleKey', v)} />
+                )}
+                {settings.preferredModel === 'Moonshot AI' && (
+                    <SettingInput label="Moonshot AI API Key" placeholder="sk-..." value={settings.moonshotKey} onChange={v => onChange('moonshotKey', v)} />
+                )}
+                {settings.preferredModel === 'MiniMax' && (
+                    <SettingInput label="MiniMax API Key" placeholder="..." value={settings.minimaxKey} onChange={v => onChange('minimaxKey', v)} />
+                )}
+                {settings.preferredModel === 'DeepSeek' && (
+                    <SettingInput label="DeepSeek API Key" placeholder="sk-..." value={settings.deepseekKey} onChange={v => onChange('deepseekKey', v)} />
+                )}
             </section>
 
             <div className="h-px bg-border/60" />
@@ -140,6 +266,9 @@ export default function MainInput() {
     const [isFocused, setIsFocused] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [selectedType, setSelectedType] = useState<ProjectType>('Full Stack App');
+    const [operationalMode, setOperationalMode] = useState<OperationalMode>('SDLC');
+    const [showModes, setShowModes] = useState(false);
+    const modeBtnRef = useRef<HTMLButtonElement>(null);
 
     // Models
     const [models, setModels] = useState<ModelOption[]>([]);
@@ -157,7 +286,11 @@ export default function MainInput() {
     // Settings
     const [showSettings, setShowSettings] = useState(false);
     const [settingsData, setSettingsData] = useState<SettingsData>({
+        preferredModel: 'OpenAI',
+        groqModel: 'llama-3.3-70b-versatile',
         groqKey: '', openaiKey: '', anthropicKey: '',
+        googleKey: '', mistralKey: '', moonshotKey: '',
+        minimaxKey: '', deepseekKey: '', qwenKey: '',
         jiraHost: '', jiraEmail: '', jiraApiToken: '', jiraProjectKey: '',
     });
     const [settingsSaved, setSettingsSaved] = useState(false);
@@ -183,7 +316,8 @@ export default function MainInput() {
             })
             .catch(() => {
                 const fallback: ModelOption[] = [
-                    { id: 'gemini-flash', name: 'Gemini 2.0 Flash', provider: 'vertex', costTier: 'low' },
+                    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'vertex', costTier: 'low' },
+                    { id: 'gemini-flash', name: 'Gemini 1.5 Flash', provider: 'vertex', costTier: 'low' },
                     { id: 'llama-3.3-70b', name: 'Llama 3.3 70B', provider: 'groq', costTier: 'free' },
                 ];
                 setModels(fallback);
@@ -202,6 +336,7 @@ export default function MainInput() {
             if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
                 setShowModels(false);
                 setShowSettings(false);
+                setShowModes(false);
             }
         }
         document.addEventListener('mousedown', handle);
@@ -256,6 +391,7 @@ export default function MainInput() {
                 body: JSON.stringify({
                     topic: input.trim(),
                     projectType: selectedType,
+                    operationalMode,
                     modelId: selectedModel?.id ?? '',
                     userKeys: Object.keys(userKeys).length ? userKeys : undefined,
                     maxRounds: 3,
@@ -264,14 +400,14 @@ export default function MainInput() {
 
             const data = res.ok ? await res.json() : {};
             const params = new URLSearchParams({
-                q: input, type: selectedType,
+                q: input, type: selectedType, mode: operationalMode,
                 ...(data.jobId ? { jobId: data.jobId } : {}),
                 ...(selectedModel ? { model: selectedModel.id } : {}),
                 visibility: isPublic ? 'public' : 'private',
             });
             router.push(`/workspace?${params}`);
         } catch {
-            router.push(`/workspace?${new URLSearchParams({ q: input, type: selectedType })}`);
+            router.push(`/workspace?${new URLSearchParams({ q: input, type: selectedType, mode: operationalMode })}`);
         } finally {
             setIsSubmitting(false);
         }
@@ -314,7 +450,7 @@ export default function MainInput() {
                             onChange={e => setInput(e.target.value)}
                             onFocus={() => setIsFocused(true)}
                             onBlur={() => setIsFocused(false)}
-                            placeholder="Build me an e-commerce platform with..."
+                            placeholder={PROJECT_TYPE_DETAILS[selectedType].placeholder}
                             rows={3}
                             className="w-full bg-transparent text-foreground placeholder:text-muted-foreground/50 resize-none outline-none text-sm leading-relaxed"
                             onInput={e => {
@@ -360,19 +496,39 @@ export default function MainInput() {
 
                             <div className="w-px h-4 bg-border mx-1" />
 
+                            {/* Operational Mode button */}
+                            <button
+                                ref={modeBtnRef}
+                                type="button"
+                                onClick={() => { setShowModes(v => !v); setShowModels(false); setShowSettings(false); }}
+                                className={`flex items-center pl-2 pr-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-transparent min-w-[130px] justify-between box-border
+                                    ${showModes
+                                        ? 'bg-muted !border-border text-foreground'
+                                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                                    }`}
+                            >
+                                <div className="flex items-center gap-1.5 overflow-hidden">
+                                    {MODE_ICONS[operationalMode]}
+                                    <span className="truncate">{operationalMode}</span>
+                                </div>
+                                <ChevronDown className={`w-3 h-3 opacity-60 flex-shrink-0 transition-transform ${showModes ? 'rotate-180' : ''}`} />
+                            </button>
+
                             {/* Model selector button */}
                             <button
                                 ref={modelBtnRef}
                                 type="button"
-                                onClick={() => { setShowModels(v => !v); setShowSettings(false); }}
-                                className={`flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg text-xs font-medium transition-colors border
+                                onClick={() => { setShowModels(v => !v); setShowSettings(false); setShowModes(false); }}
+                                className={`flex items-center pl-2 pr-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-transparent min-w-[140px] justify-between box-border
                                     ${showModels
-                                        ? 'bg-muted border-border text-foreground'
-                                        : 'bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                                        ? 'bg-muted !border-border text-foreground'
+                                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                                     }`}
                             >
-                                <ModelIcon model={selectedModel} className="w-4 h-4" />
-                                <span className="truncate">{selectedModel?.name ?? 'Select model'}</span>
+                                <div className="flex items-center gap-1.5 overflow-hidden">
+                                    <ModelIcon model={selectedModel} className="w-4 h-4" />
+                                    <span className="truncate">{selectedModel?.name ?? 'Select model'}</span>
+                                </div>
                                 <ChevronDown className={`w-3 h-3 opacity-60 flex-shrink-0 transition-transform ${showModels ? 'rotate-180' : ''}`} />
                             </button>
                         </div>
@@ -382,9 +538,9 @@ export default function MainInput() {
                             {/* Public / Private */}
                             <button type="button" onClick={() => setIsPublic(v => !v)}
                                 title={isPublic ? 'Public repo' : 'Private repo'}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors min-w-[80px] justify-center box-border
                                     ${isPublic
-                                        ? 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                                        ? 'border-border text-muted-foreground hover:text-foreground hover:bg-muted/50'
                                         : 'border-amber-500/40 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20'
                                     }`}>
                                 {isPublic ? <Globe className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
@@ -395,7 +551,7 @@ export default function MainInput() {
                             <button
                                 ref={settingsBtnRef}
                                 type="button"
-                                onClick={() => { setShowSettings(v => !v); setShowModels(false); }}
+                                onClick={() => { setShowSettings(v => !v); setShowModels(false); setShowModes(false); }}
                                 title="Settings"
                                 className={`p-2 rounded-lg transition-colors ${showSettings
                                     ? 'text-primary bg-primary/10'
@@ -460,6 +616,37 @@ export default function MainInput() {
                 )}
             </AnimatePresence>
 
+            {/* ── Operational Mode Popover ─────────────────────────────── */}
+            <AnimatePresence>
+                {showModes && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                        transition={{ duration: 0.12 }}
+                        className="absolute left-0 top-[calc(100%+6px)] w-48 bg-card border border-border rounded-2xl shadow-2xl shadow-black/25 z-50 overflow-hidden"
+                    >
+                        <div className="p-1.5 grid grid-cols-1 gap-1">
+                            {OPERATIONAL_MODES.map(m => (
+                                <button
+                                    key={m}
+                                    type="button"
+                                    onClick={() => { setOperationalMode(m); setShowModes(false); }}
+                                    className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs transition-colors text-left
+                                        ${operationalMode === m
+                                            ? 'bg-primary/10 text-foreground'
+                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
+                                >
+                                    {MODE_ICONS[m]}
+                                    <span className="flex-1 font-medium">{m}</span>
+                                    {operationalMode === m && <Check className="w-3 h-3 text-primary flex-shrink-0" />}
+                                </button>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* ── Settings Popover ────────────────────────────────────── */}
             {/* Absolutely positioned relative to wrapperRef, no layout effect */}
             <AnimatePresence>
@@ -484,6 +671,7 @@ export default function MainInput() {
                                 onChange={(k, v) => setSettingsData(prev => ({ ...prev, [k]: v }))}
                                 onSave={saveSettings}
                                 saved={settingsSaved}
+                                selectedType={selectedType}
                             />
                         </div>
                         <div className="px-4 py-2 border-t border-border bg-muted/20">

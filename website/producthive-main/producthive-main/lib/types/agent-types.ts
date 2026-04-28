@@ -66,7 +66,7 @@ export type ProjectType =
     | 'Mobile App'
     | 'Landing Page'
     | 'Dashboard'
-    | 'Chrome Extension';
+    | 'Portfolio';
 
 export interface PRDState {
     projectName: string;
