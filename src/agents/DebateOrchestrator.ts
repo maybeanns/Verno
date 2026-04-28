@@ -65,24 +65,64 @@ export class DebateOrchestrator {
         let history = [...previousMessages];
         const numRounds = 3;
 
-        // ── Phase A: Multi-round debate ────────────────────────────────────
+        let roundSummaries: string[] = [];
+        let previousRoundTranscript = '';
+
+        // ── Phase A: Multi-round debate (Single-call simulation per round) ─
         for (let round = 1; round <= numRounds; round++) {
             if (cancellationToken?.isCancellationRequested) { throw new Error('Cancelled by user'); }
             this.logger.info(`  Round ${round}/${numRounds}`);
-            for (const agent of DEBATE_AGENTS) {
-                if (cancellationToken?.isCancellationRequested) { throw new Error('Cancelled by user'); }
-                const prompt = this.buildPrompt(topic, agent.id, agent.role, history, round);
-                const response = await this.llmService.generateText(prompt);
+            
+            const roundPrompt = this.buildRoundPrompt(topic, round, roundSummaries, previousRoundTranscript);
+            let roundJson = await this.llmService.generateText(roundPrompt);
+            
+            // Robust JSON extraction
+            const jsonMatch = roundJson.match(/\[\s*\{[\s\S]*\}\s*\]/);
+            if (jsonMatch) {
+                roundJson = jsonMatch[0];
+            } else {
+                roundJson = roundJson.replace(/```json/gi, '').replace(/```/g, '').trim();
+            }
 
-                const msg: DebateMessage = {
-                    agentId: agent.id,
-                    content: response.trim(),
-                    round,
-                    timestamp: Date.now(),
-                    type: round === 1 ? 'argument' : 'counter',
-                };
-                history.push(msg);
-                onMessage(msg);
+            let roundMessages: DebateMessage[] = [];
+            try {
+                const parsed = JSON.parse(roundJson);
+                for (const p of parsed) {
+                    if (DEBATE_AGENTS.find(a => a.id === p.agentId)) {
+                        const msg: DebateMessage = {
+                            agentId: p.agentId,
+                            content: p.content,
+                            round,
+                            timestamp: Date.now(),
+                            type: round === 1 ? 'argument' : 'counter'
+                        };
+                        roundMessages.push(msg);
+                        history.push(msg);
+                        onMessage(msg); // Emit sequentially for UI
+                    }
+                }
+            } catch (e) {
+                this.logger.error(`Failed to parse round ${round} JSON`, e as Error);
+                // Fallback: If JSON parsing fails, we skip this round or handle gracefully.
+                continue; 
+            }
+
+            // ── Dynamic Early Termination Check ─────────────────────────────
+            if (round >= 2 && round < numRounds) {
+                const checkPrompt = `Based on the following messages from Round ${round}, have the agents reached a clear consensus on the topic? Answer ONLY "YES" or "NO".\n\n${roundMessages.map(m => `[${m.agentId}]: ${m.content}`).join('\n')}`;
+                const checkResponse = await this.llmService.generateText(checkPrompt);
+                if (checkResponse.trim().toUpperCase().includes('YES')) {
+                    this.logger.info('  Dynamic Early Termination: Consensus reached.');
+                    break;
+                }
+            }
+
+            // ── Context Compression & Summarization ─────────────────────────
+            if (round < numRounds) {
+                const summaryPrompt = `Provide a concise 3-bullet summary of the following debate round. Focus on key decisions, remaining disagreements, and technical constraints:\n\n${roundMessages.map(m => `[${m.agentId}]: ${m.content}`).join('\n')}`;
+                const summary = await this.llmService.generateText(summaryPrompt);
+                roundSummaries.push(summary.trim());
+                previousRoundTranscript = roundMessages.map(m => `[${m.agentId}]: ${m.content}`).join('\n');
             }
         }
 
@@ -90,11 +130,11 @@ export class DebateOrchestrator {
         if (cancellationToken?.isCancellationRequested) { throw new Error('Cancelled by user'); }
         this.logger.info('  Convergence phase');
         const convergencePrompt = `You are the Product Manager who has chaired the debate.
-The 3-round debate among the 8 BMAD agents (including the Security Engineer) has concluded.
+The debate among the 8 BMAD agents (including the Security Engineer) has concluded.
 Original Topic: ${topic}
 
-Full Debate Transcript:
-${history.map(m => `[${m.agentId.toUpperCase()}]: ${m.content}`).join('\n\n')}
+Final Round Transcript:
+${previousRoundTranscript}
 
 Synthesize the debate into a single executive consensus. Resolve disagreements authoritatively.
 Include any security concerns and compliance requirements raised by the Security Engineer.
@@ -114,12 +154,12 @@ Keep it concise but authoritative (max 250 words).`;
         // ── Phase C: PRD generation ────────────────────────────────────────
         if (cancellationToken?.isCancellationRequested) { throw new Error('Cancelled by user'); }
         this.logger.info('  PRD generation');
-        const prdPrompt = `You are a Technical Product Manager. Based on the following debate and executive summary, generate a formal Product Requirements Document (PRD).
+        const prdPrompt = `You are a Technical Product Manager. Based on the following executive summary and debate context, generate a formal Product Requirements Document (PRD).
 
 Original Topic: ${topic}
 
-Debate History & Consensus:
-${history.map(m => `[${m.agentId.toUpperCase()}]: ${m.content}`).join('\n\n')}
+Executive Summary:
+${convergenceResponse}
 
 Respond ONLY with valid JSON — an array of section objects. No markdown fences. No keys other than "title" and "content".
 
@@ -138,9 +178,9 @@ Required sections (in this order):
         let prdJson = await this.llmService.generateText(prdPrompt);
 
         // Robust JSON extraction: look for the start of the array
-        const jsonMatch = prdJson.match(/\[\s*\{[\s\S]*\}\s*\]/);
-        if (jsonMatch) {
-            prdJson = jsonMatch[0];
+        const jsonMatchPrd = prdJson.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        if (jsonMatchPrd) {
+            prdJson = jsonMatchPrd[0];
         } else {
             prdJson = prdJson.replace(/```json/gi, '').replace(/```/g, '').trim();
         }
@@ -175,45 +215,48 @@ Required sections (in this order):
     // ── Private helpers ──────────────────────────────────────────────────────
 
     /**
-     * Build an agent-specific debate prompt.
-     * The security agent gets a hardened prompt that probes for attack vectors,
-     * data classification needs, and compliance requirements.
+     * Build a round-specific debate prompt that simulates all agents in a single call.
      */
-    private buildPrompt(
+    private buildRoundPrompt(
         topic: string,
-        agentId: string,
-        role: string,
-        history: DebateMessage[],
-        round: number
+        round: number,
+        roundSummaries: string[],
+        previousRoundTranscript: string
     ): string {
-        const historyText = history.length === 0
-            ? 'No prior messages.'
-            : history.map(m => `[${m.agentId.toUpperCase()}]: ${m.content}`).join('\n\n');
+        let contextText = 'No prior rounds.';
+        if (round > 1) {
+            contextText = `Previous Round Summaries:\n${roundSummaries.map((s, i) => `Round ${i + 1}:\n${s}`).join('\n\n')}\n\n`;
+            contextText += `Full Transcript of Immediate Previous Round:\n${previousRoundTranscript}`;
+        }
 
         const baseInstruction = round === 1
-            ? 'State your initial perspective, identifying key priorities and potential challenges from your domain.'
-            : 'Respond to your colleagues\' points. Defend your domain\'s needs, suggest compromises, or highlight issues in their proposals.';
+            ? "State each agent's initial perspective, identifying key priorities and potential challenges from their domain."
+            : "Have each agent respond to their colleagues' previous points. Defend their domain's needs, suggest compromises, or highlight issues in proposals.";
 
-        const securityAddendum = agentId === 'security'
-            ? `
+        return `You are simulating a collaborative team debate on:
+Topic: ${topic}
+
+Agents participating:
+${DEBATE_AGENTS.map(a => `- ${a.id.toUpperCase()}: ${a.role}`).join('\n')}
+
+Debate context so far:
+${contextText}
+
+This is Round ${round}. ${baseInstruction}
+
 As Security Engineer, ALWAYS address:
 1. What attack vectors exist in the proposed feature? (reference OWASP Top 10 categories)
 2. Does this feature collect or process PII or health data? (flag for GDPR/HIPAA)
 3. What authentication and authorization model is required?
 4. Are there any insecure defaults, hardcoded secrets, or misconfiguration risks?
-5. What threat model applies (spoofing, tampering, repudiation, info disclosure, DoS, elevation)?
-Be specific and non-negotiable on security requirements.`
-            : '';
+5. What threat model applies?
 
-        return `You are the ${role} in a team debate on:
-Topic: ${topic}
-
-Debate history so far:
-${historyText}
-
-This is Round ${round}. ${baseInstruction}${securityAddendum}
-
-Keep your response under 150 words. Be direct, professional, and represent your role's priorities firmly.`;
+Respond strictly with a JSON array of objects, one for each agent. Do not include markdown fences.
+Format:
+[
+  { "agentId": "analyst", "content": "Keep response under 150 words. Be direct, professional, and represent the role." },
+  ... (include all 8 agents)
+]`;
     }
 
     /**
