@@ -246,7 +246,7 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
                                 {/* Response text */}
                                 <div className="text-[13px] text-white/60 leading-relaxed pl-7">
                                     <span dangerouslySetInnerHTML={{
-                                        __html: msg.content.replace(/@([\w\s/()]+?)(?=\s|$)/g, '<span class="text-[#DD830A] font-semibold">@$1</span>')
+                                        __html: formatChatText(msg.content)
                                     }} />
                                 </div>
                             </div>
@@ -371,4 +371,50 @@ function parseErrorMessage(raw: string): string {
     if (lowerRaw.includes('429') || lowerRaw.includes('rate limit') || lowerRaw.includes('rate_limit')) return 'Rate limit reached. Please wait a moment and try again.';
     if (raw.length > 200) return 'An unexpected error occurred. Please check your Settings and try again.';
     return raw;
+}
+
+function formatChatText(text: string): string {
+    if (!text) return '';
+
+    // First replace mentions so they are protected
+    let html = text.replace(/@([\w\s/()]+?)(?=\s|[.,:]|$)/g, '<span class="text-[#DD830A] font-semibold">@$1</span>');
+
+    // Split by lines to process headings and lists
+    const lines = html.split('\n');
+    let out = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+        
+        if (!line) {
+            out.push('<div class="h-2"></div>');
+            continue;
+        }
+
+        // Bold and Code
+        line = line
+            .replace(/\*\*(.+?)\*\*/g, '<strong class="text-white/90 font-semibold">$1</strong>')
+            .replace(/`([^`]+)`/g, '<code class="bg-white/[0.08] px-1 py-0.5 rounded text-[12px] font-mono text-[#DD830A]/90">$1</code>');
+
+        if (line.startsWith('# ')) {
+            out.push(`<strong class="text-[#DD830A] text-[14px] font-bold block mt-3 mb-1">${line.slice(2)}</strong>`);
+        } else if (line.startsWith('## ')) {
+            out.push(`<strong class="text-white/90 text-[13px] font-bold block mt-2 mb-1">${line.slice(3)}</strong>`);
+        } else if (line.startsWith('### ')) {
+            out.push(`<strong class="text-white/80 text-[13px] font-semibold block mt-2 mb-1">${line.slice(4)}</strong>`);
+        } else if (line.match(/^[-*]\s+/)) {
+            // Unordered list
+            const content = line.replace(/^[-*]\s+/, '');
+            out.push(`<div class="pl-4 relative before:content-['•'] before:absolute before:left-0 before:text-white/40 mb-1">${content}</div>`);
+        } else if (line.match(/^\d+\.\s+/)) {
+            // Ordered list
+            const content = line.replace(/^\d+\.\s+/, '');
+            out.push(`<div class="pl-4 relative before:content-['-'] before:absolute before:left-0 before:text-white/40 mb-1">${content}</div>`);
+        } else {
+            // Normal paragraph line
+            out.push(`<div class="mb-1">${line}</div>`);
+        }
+    }
+
+    return out.join('');
 }

@@ -6,6 +6,7 @@ import { Hexagon, Eye, Code2, Terminal, Share2, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import WorkspaceChat from './WorkspaceChat';
 import PRDViewer from './PRDViewer';
+import DevWorkspaceLayout from './DevWorkspaceLayout';
 
 // ── 8 BMAD agents (identical to extension's DebateOrchestrator) ──────────────
 
@@ -39,6 +40,17 @@ export default function WorkspaceLayout({
     model,
     visibility,
 }: WorkspaceLayoutProps) {
+    // ── Route to DevWorkspaceLayout for Develop mode ──────────────────────
+    if (mode === 'Develop') {
+        return (
+            <DevWorkspaceLayout
+                query={query}
+                projectType={projectType}
+                mode={mode}
+                visibility={visibility}
+            />
+        );
+    }
     const [prdContent, setPrdContent] = useState<string>('');
     const [prdTitle, setPrdTitle] = useState<string>('');
     const [isGenerating, setIsGenerating] = useState(true);

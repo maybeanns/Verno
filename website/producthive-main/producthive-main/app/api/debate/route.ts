@@ -212,36 +212,36 @@ async function callLLM(
 // Per-agent deep-dive instructions — tells each agent EXACTLY what specifics to provide
 const AGENT_SPECIFICS: Record<string, { r1: string; r2: string }> = {
     analyst: {
-        r1: 'Identify 2-3 concrete user personas (name, role, goal). Define 3-5 measurable KPIs with targets (e.g., "scan completion rate >95%"). Propose a pricing model (freemium tiers, per-use, subscription). What is the competitive differentiator vs. existing tools?',
-        r2: 'Refine personas based on team feedback. Add success metrics with numbers. Challenge vague goals — replace with measurable outcomes. Define what "done" looks like for MVP vs. Phase 2.',
+        r1: 'Define 3 distinct, specific user personas (Name, Role, Context, Pain point). E.g., not "developers" but "Sarah, Freelance Dev: needs 1-page PDF for client handoff". Define a concrete pricing proposal (e.g., freemium with $29/mo tier vs per-scan). State competitive positioning: why pick this over Qualys/Rapid7/ZAP? What is the moat (speed, UX, price)?',
+        r2: 'Refine personas to be highly specific based on feedback. Add measurable KPIs (e.g., churn, NPS, scan completion). Finalize the pricing strategy (do not defer this). Define what MVP success looks like.',
     },
     architect: {
-        r1: 'Propose a concrete technical architecture: list specific technologies/frameworks, describe the data flow (input → processing → storage → output), define API endpoints, specify database schema concepts, and state infrastructure requirements (cloud provider, scaling strategy). Name specific tools/libraries, not generic categories.',
-        r2: 'Respond to feasibility concerns. Provide a system diagram description (components and data flow). Address performance specs: expected latency, throughput, queue sizes, timeout limits. Specify what third-party services or APIs are needed.',
+        r1: 'Propose a concrete technical architecture. Describe the exact data flow (e.g., User → API Gateway → Auth → Queue → ZAP worker → DB → Report renderer). Specify scaling rules (how many instances?), expected scan times, and where the bottleneck is. Include an architecture diagram description.',
+        r2: 'Respond to feasibility concerns. Address failure handling: What if a worker crashes mid-scan? Is the report partial or retried? State explicit performance specs: latency, queue sizes, timeouts.',
     },
     ux: {
-        r1: 'Describe 2-3 key user flows step-by-step (e.g., "User enters URL → clicks Scan → sees progress bar → receives report with risk score"). Define the report layout: what sections, what order, what visualizations. Specify accessibility requirements (WCAG level). What export formats are supported (PDF, JSON, CSV)?',
-        r2: 'Refine flows based on feedback. Add specific UI acceptance criteria (e.g., "report loads in <2s", "mobile-responsive at 375px+"). Define error states and empty states. What does the onboarding flow look like?',
+        r1: 'Describe 2-3 key user flows. Define the Report Structure in detail: What metrics on the summary page? Severity tiers? Prioritization logic? Filtering/sorting capabilities? Describe the first-run onboarding experience (5-min tutorial, sample scan?).',
+        r2: 'Refine report layout. How are remediation recommendations presented? Add UI acceptance criteria (load times, mobile). Define error states if a scan fails.',
     },
     developer: {
-        r1: 'List the exact tech stack (languages, frameworks, libraries, databases). Define the project structure and key modules/services. What build tools, CI/CD pipeline, and deployment strategy? Estimate implementation complexity for each major feature (S/M/L). What are the technical risks and unknowns?',
-        r2: 'Respond to architecture proposals with feasibility assessment. Identify technical debt risks. Propose specific testing strategy (unit, integration, e2e — with tools). What needs to be built vs. what can use existing open-source tools?',
+        r1: 'List the exact tech stack (languages, frameworks, libraries, databases). Define the project structure. What build tools, CI/CD pipeline, and deployment strategy? Estimate implementation complexity. Address scanning integration details and worker management.',
+        r2: 'Respond to architecture proposals. Identify technical debt risks. Propose specific testing strategy. What needs to be built vs open-source?',
     },
     pm: {
-        r1: 'Define a 3-phase roadmap: MVP (launch), Phase 2 (growth), Phase 3 (scale). List specific features per phase with priority (P0/P1/P2). Define scope boundaries — what is explicitly OUT of scope for MVP? What are the go-to-market milestones?',
-        r2: 'Resolve disagreements between agents. Finalize MVP scope with clear cut-line. Add timeline estimates per phase. Define launch criteria — what must be true before shipping? Include rollback plan.',
+        r1: 'Define a 3-phase roadmap. MVP (launch), Phase 2 (growth), Phase 3 (scale). List specific features per phase. Do not defer pricing; mandate a pricing decision for MVP. What are the GTM milestones?',
+        r2: 'Resolve disagreements. Finalize MVP scope. Ensure report structure, pricing, and architecture diagrams are strictly included in the consensus. Define launch criteria.',
     },
     qa: {
-        r1: 'Define specific test scenarios for each major feature (happy path + edge cases + failure modes). What is the false positive/negative threshold for scan accuracy? Define performance benchmarks (scan time, concurrent users, report generation speed). What monitoring and alerting is needed?',
-        r2: 'Challenge vague acceptance criteria — replace with measurable test cases. Define the QA strategy: manual vs. automated ratio, regression suite scope, load testing approach. What are the top 5 things most likely to break?',
+        r1: 'Define specific test scenarios. What happens if a scan takes >5 minutes? (Async + email notifications vs real-time if <30s). Define false positive/negative thresholds. What monitoring and alerting is needed?',
+        r2: 'Challenge vague acceptance criteria. Define the QA strategy (manual vs automated, load testing). Identify the top 5 things most likely to break.',
     },
     techwriter: {
-        r1: 'Define the documentation deliverables: API reference (OpenAPI spec?), user guide, admin guide, FAQ. What does the report template look like (section headings, data points, visualization types)? How are remediation recommendations structured (severity + description + fix steps)?',
-        r2: 'Refine report structure based on team feedback. Ensure all technical terms have user-facing explanations. Define the in-app help strategy (tooltips, docs, chatbot?). What onboarding documentation is needed for Day 1?',
+        r1: 'Define documentation deliverables. Detail the onboarding strategy (welcome emails, help templates). What is the exact structure of a vulnerability recommendation (Severity + Business Risk + Fix Steps)?',
+        r2: 'Refine the report and onboarding docs based on feedback. Ensure all technical terms have user-facing explanations.',
     },
     security: {
-        r1: 'Define the threat model: what attack vectors does this product face (not just what it tests)? Specify auth model (OAuth 2.0, API keys, MFA?). Data classification: what is PII, what is PHI, what is public? Encryption spec: at-rest (algorithm, key management) and in-transit (TLS version). How are scan results isolated between users? Rate limiting and abuse prevention strategy.',
-        r2: 'Address: GDPR compliance specifics (data retention period, right to erasure implementation, consent mechanism, DPA requirements). HIPAA applicability assessment (is PHI handled? if yes: BAA, audit logging, access controls). OWASP Top 10 coverage (which specific vulnerabilities are tested, which are not). Incident response plan outline. Secret management strategy (key rotation, vault).',
+        r1: 'Define the threat model FOR THIS SERVICE: How do you prevent API abuse (scan bombing)? How do you handle stored XSS in report data? DMCA/scanning unowned sites (verification mechanisms)? Secure deletion of scan data? Auth model and data classification.',
+        r2: 'Provide concrete GDPR implementation details (e.g., "Consent banner on signup, auto-delete scans after 90 days per Art. 17, DPA with AWS"). State explicitly if PHI is handled; if NO, state "No PHI handling".',
     },
 };
 
@@ -324,23 +324,23 @@ REQUIRED SECTIONS (in this order):
 
 2. "Problem Statement" — The specific pain point. Include market context and why existing solutions fail. Be concrete.
 
-3. "User Personas & Stories" — Define 2-3 personas (Name, Role, Goal, Pain Point). Then 3-5 user stories in format: "As a [persona], I want to [action] so that [outcome]." Each story must be specific and testable.
+3. "User Personas & Stories" — Define 3 distinct, specific personas (Name, Role, Work Context, Specific Pain Point). Then 3-5 specific user stories.
 
-4. "Goals & Non-Goals" — Goals: 3-5 measurable objectives with target metrics (e.g., "Achieve <5% false positive rate"). Non-Goals: 3-5 things explicitly out of scope for MVP and why.
+4. "Goals, Non-Goals & Business Strategy" — Goals: 3-5 measurable objectives. Non-Goals: explicitly out of scope. Pricing Strategy: Mandatory concrete proposal (e.g., Freemium/Tiers/Costs). Competitive Positioning: Why choose this over alternatives (Qualys/Rapid7/ZAP)? What is the moat?
 
-5. "Technical Architecture" — Describe the system architecture as a data flow: Input → Processing → Storage → Output. Name specific technologies (languages, frameworks, databases, cloud services, third-party APIs). Include API design approach (REST/GraphQL, key endpoints). Describe the data model (key entities and relationships). State infrastructure requirements (hosting, scaling, CDN).
+5. "Technical Architecture" — Include a detailed architecture diagram description (e.g., User → API Gateway → Worker → DB). Name specific technologies. Define scaling rules, expected scan times, bottleneck analysis, and failure handling (what happens if a worker crashes mid-scan).
 
-6. "Scanning Engine & Capabilities" (if applicable, otherwise "Core Engine & Capabilities") — What specific capabilities does the product have? What are the limitations? What tools/libraries power it? Performance specs: throughput, latency targets, timeout limits, concurrency.
+6. "Core Engine & Capabilities" — What specific capabilities does the product have? What are the limitations? What tools/libraries power it? Performance specs: throughput, latency targets, timeout limits, concurrency.
 
-7. "Report & Output Specification" — What does the output look like? Describe the structure (sections, metrics, visualizations). What export formats are supported (PDF, JSON, CSV)? How are results prioritized (severity scoring, risk scores)?
+7. "Report Structure & Output" — Describe the core deliverable. What metrics appear on the summary page? Severity tiers (Critical/High/Medium/Low)? Prioritization logic? Filtering/sorting capabilities? Export formats? Describe the visual layout.
 
-8. "Data Handling & Privacy" — Data classification (PII, PHI, public). Encryption: at-rest (algorithm) and in-transit (TLS version). Data retention policy (duration, auto-deletion). User data rights (export, deletion). Third-party data sharing policy. Consent mechanism. For GDPR: Art. 5 retention, Art. 17 erasure, Art. 25 privacy by design. For HIPAA (if applicable): BAA, audit logging, access controls, PHI handling.
+8. "Data Handling & Privacy" — Data classification (PII, PHI, public). Encryption: at-rest and in-transit. Data retention policy. For GDPR: concrete implementations (e.g., "Consent banner on signup, auto-delete after 90 days per Art. 17"). For HIPAA: BAA, audit logging, or explicitly state "No PHI handled".
 
-9. "Security & Threat Model" — Threat model for the product itself (not just what it tests). Auth model (OAuth 2.0, API keys, MFA). Rate limiting and abuse prevention. Secret management (key rotation, vault). Incident response outline. What OWASP Top 10 vectors apply to this product?
+9. "Security & Threat Model" — Threat model FOR THIS SERVICE: API abuse prevention (scan bombing), handling stored XSS in report data, scanning unowned sites (DMCA verification), secure data deletion. Auth model and secret management.
 
-10. "Success Metrics & Acceptance Criteria" — 5-7 measurable KPIs with specific targets (e.g., "Scan completion rate >95%", "User retention 40%+ at M1", "NPS >40", "P99 latency <3s"). Acceptance criteria must be testable, not subjective. Include performance benchmarks.
+10. "Success Metrics & Acceptance Criteria" — 5-7 measurable KPIs with targets (e.g., NPS >40, User retention M1 >40%). Acceptance criteria must be testable. Include onboarding strategy (e.g., first-run 5-min tutorial).
 
-11. "Roadmap" — 3 phases: MVP (features + timeline), Phase 2 (features + timeline), Phase 3 (features + timeline). Each phase lists specific features. Include launch criteria for MVP. Include pricing/GTM strategy if discussed.
+11. "Roadmap" — 3 phases: MVP, Phase 2, Phase 3. Each phase lists specific features. Include launch criteria for MVP.
 
 12. "Risks & Mitigations" — 5-7 concrete risks with severity (High/Medium/Low), likelihood, impact, and specific mitigation strategy. Include technical risks, business risks, and compliance risks. No vague mitigations like "develop a plan" — state the actual plan.
 
@@ -399,15 +399,19 @@ function applySecurityPass(sections: PRDSection[]): PRDSection[] {
         let gdprFlagged = false;
         let hipaaFlagged = false;
 
+        // Check for negations to prevent false positive flags
+        const explicitlyNoPHI = lower.match(/\b(no|zero|without|not\shandling)\s+(phi|protected\shealth|health\sdata)\b/i) || lower.includes('phi: none') || lower.includes('phi is not');
+        const explicitlyNoGDPR = lower.match(/\b(no|zero|without|not\shandling)\s+(pii|personal\sdata)\b/i) || lower.includes('pii: none');
+
         for (const kw of GDPR_KEYWORDS) {
-            if (lower.includes(kw) && !gdprFlagged) {
-                const action = GDPR_ACTIONS[kw] || `Add explicit consent mechanism, data retention policy (Art. 5), and right-to-erasure endpoint (Art. 17)`;
+            if (!explicitlyNoGDPR && lower.includes(kw) && !gdprFlagged) {
+                const action = GDPR_ACTIONS[kw] || `Implement consent banners on signup. Auto-delete data after 90 days (per Art. 17). DPA with cloud providers required.`;
                 flags.push(`⚠️ GDPR: "${kw}" detected in "${section.title}" — ${action}`);
                 gdprFlagged = true;
             }
         }
         for (const kw of HIPAA_KEYWORDS) {
-            if (lower.includes(kw) && !hipaaFlagged) {
+            if (!explicitlyNoPHI && lower.includes(kw) && !hipaaFlagged) {
                 const action = HIPAA_ACTIONS[kw] || `Encrypt PHI at rest (AES-256) and in transit (TLS 1.3); enable audit logging; BAA required`;
                 flags.push(`⚠️ HIPAA: "${kw}" detected in "${section.title}" — ${action}`);
                 hipaaFlagged = true;
