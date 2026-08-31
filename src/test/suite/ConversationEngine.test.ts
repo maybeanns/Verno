@@ -14,7 +14,18 @@ suite('ConversationEngine Test Suite', () => {
   setup(() => {
     // Stub global fetch
     sinon.stub(global, 'fetch').callsFake(async (url: string | URL | Request, init?: RequestInit) => {
-      // Return a basic mock response matching Groq structure
+      const urlStr = url.toString();
+      if (urlStr.includes('anthropic.com')) {
+        return {
+          ok: true,
+          json: async () => ({
+            content: [
+              { text: 'This is a mocked conversational reply.' }
+            ]
+          }),
+          text: async () => 'OK'
+        } as Response;
+      }
       return {
         ok: true,
         json: async () => ({

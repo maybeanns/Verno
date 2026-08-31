@@ -9,7 +9,7 @@
     "url": "https://github.com/maybeanns/Verno"
   },
   "engines": {
-    "vscode": "^1.80.0"
+    "vscode": "^1.90.0"
   },
   "icon": "media/logo.png",
   "activationEvents": [],
@@ -218,7 +218,34 @@
           "description": "Local Whisper model size. large-v3 = most accurate, base = fastest"
         }
       }
-    }
+    },
+    "chatParticipants": [
+      {
+        "id": "verno.assistant",
+        "name": "verno",
+        "fullName": "Verno SDLC Co-Pilot",
+        "description": "AI-powered SDLC co-pilot. Start with /sdlc, /debate, /review, or /status.",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "sdlc",
+            "description": "Trigger the full 9-phase SDLC pipeline for a feature or application"
+          },
+          {
+            "name": "debate",
+            "description": "Start an 8-agent PRD debate to generate a Product Requirements Document"
+          },
+          {
+            "name": "review",
+            "description": "Review the currently active file for bugs, security issues, and improvements"
+          },
+          {
+            "name": "status",
+            "description": "Check the status of active or interrupted SDLC pipeline runs"
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

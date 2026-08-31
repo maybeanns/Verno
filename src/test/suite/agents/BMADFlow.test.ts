@@ -36,7 +36,7 @@ suite('BMAD Flow Tests', () => {
     registry.register('act', new ActAgent(mockLogger, llm) as any);
 
     const context = { workspaceRoot: process.cwd(), metadata: { userRequest: 'test request' } } as any;
-    const outputs = await manager.runPipeline(context);
+    const outputs = await manager.runPipeline(context, ['brainstorm', 'model', 'decide', 'act']);
 
     assert.ok(outputs.brainstorm?.includes('part1') || outputs.brainstorm?.includes('response for'));
     assert.ok(outputs.model);

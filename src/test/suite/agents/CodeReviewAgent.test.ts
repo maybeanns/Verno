@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import * as sinon from 'sinon';
 import { CodeReviewAgent } from '../../../agents/BMAD/CodeReviewAgent';
 import { LLMService } from '../../../services/llm';
 import { FileService } from '../../../services/file/FileService';
@@ -163,7 +164,7 @@ export const createUser = async (req: Request, res: Response) => {
 
     test('execute returns review report', async () => {
         const context = {
-            workspaceRoot: process.cwd(),
+            workspaceRoot: '/mock/workspace',
             metadata: {
                 userRequest: 'build a signup page',
                 previousOutputs: {
@@ -171,6 +172,10 @@ export const createUser = async (req: Request, res: Response) => {
                 }
             }
         } as any;
+
+        sinon.stub(agent as any, 'checkCompilation').resolves('TypeScript compilation: PASSED');
+        sinon.stub(agent as any, 'checkTests').resolves('Tests: PASSED');
+        sinon.stub(agent as any, 'scanDirectoryForCode').returns([]);
 
         const result = await agent.execute(context);
         assert.ok(result.includes('Code Review Report'), 'Should produce a review report');

@@ -13,6 +13,7 @@ function WorkspaceContent() {
     const jobId = params.get('jobId') ?? undefined;
     const model = params.get('model') ?? undefined;
     const visibility = params.get('visibility') ?? 'public';
+    const fastTrack = params.get('fastTrack') === 'true';
 
     return (
         <WorkspaceLayout
@@ -22,6 +23,7 @@ function WorkspaceContent() {
             jobId={jobId}
             model={model}
             visibility={visibility}
+            fastTrack={fastTrack}
         />
     );
 }

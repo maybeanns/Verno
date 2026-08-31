@@ -19,14 +19,15 @@ export class TraceabilityMatrixService {
       prdContent = fs.readFileSync(fullPrdPath, 'utf8');
     }
 
-    // Very naive extraction: assumes PRD has markdown headers for sections
-    const sections = prdContent.match(/^###\s+(.*)$/gm) || ['General Feature'];
+    // Support both H2 (##) and H3 (###) headers for sections
+    const sections = prdContent.match(/^(?:##|###)\s+(.*)$/gm) || ['General Feature'];
     
     const matrixLines = ['# Requirements Traceability Matrix', '', '| PRD Section | Epic ID | Epic Title |', '|---|---|---|'];
     
     // Map epics round-robin to sections for simulation, or try to match text loosely
     epics.forEach((epic, i) => {
-      const section = sections[i % sections.length].replace('### ', '').trim();
+      const rawSection = sections[i % sections.length];
+      const section = rawSection.replace(/^(?:##|###)\s+/, '').trim();
       matrixLines.push(`| ${section} | ${epic.id || 'EPIC-'+(i+1)} | ${epic.title} |`);
     });
 

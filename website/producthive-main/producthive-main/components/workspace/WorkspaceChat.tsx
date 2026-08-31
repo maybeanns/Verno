@@ -21,6 +21,7 @@ interface WorkspaceChatProps {
     query: string; projectType: string; mode: string;
     jobId?: string; model?: string; agents: AgentInfo[];
     onPRDReady: (title: string, content: string) => void;
+    fastTrack?: boolean;
 }
 
 const THINKING_STEPS: Omit<ThinkingStep, 'status'>[] = [
@@ -50,11 +51,18 @@ function detectProvider(): { provider: string; apiKey: string; model?: string } 
     return null;
 }
 
-export default function WorkspaceChat({ query, projectType, mode, agents, onPRDReady }: WorkspaceChatProps) {
+export default function WorkspaceChat({ query, projectType, mode, agents, onPRDReady, fastTrack }: WorkspaceChatProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [steps, setSteps] = useState<ThinkingStep[]>(THINKING_STEPS.map(s => ({ ...s, status: 'pending' as const })));
+    const [steps, setSteps] = useState<ThinkingStep[]>(() =>
+        THINKING_STEPS.map(s => {
+            if (s.id === 'prd-gen' && mode === 'Plan') {
+                return { ...s, label: 'Generating Architectural & Sprint Plan', status: 'pending' as const };
+            }
+            return { ...s, status: 'pending' as const };
+        })
+    );
     const [thinkingDone, setThinkingDone] = useState(false);
     const [showMentions, setShowMentions] = useState(false);
     const [mentionFilter, setMentionFilter] = useState('');
@@ -92,7 +100,7 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
 
     async function runDebateStream(provider: string, apiKey: string, signal: AbortSignal, model?: string) {
         try {
-            const res = await fetch('/api/debate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: query, provider, apiKey, projectType, model }), signal });
+            const res = await fetch('/api/debate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: query, provider, apiKey, projectType, model, fastTrack, mode }), signal });
             if (!res.ok) { const errText = await res.text(); throw new Error(`API error ${res.status}: ${errText}`); }
             const reader = res.body?.getReader();
             if (!reader) throw new Error('No response stream');
@@ -141,11 +149,23 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
             case 'consensus':
                 setMessages(prev => [...prev, { id: `consensus-${Date.now()}`, role: 'agent', agentName: '🤝 ' + data.agentName + ' (Consensus)', agentColor: data.agentColor, content: data.content, round: data.round, debateType: 'consensus', timestamp: new Date() }]);
                 break;
+            case 'prd-progress': {
+                // The document is generated section-batch by section-batch; keep
+                // the step label live so a long PRD phase never looks stalled.
+                const base = mode === 'Plan' ? 'Generating Architectural & Sprint Plan' : 'Generating PRD document';
+                setSteps(prev => prev.map(s => s.id === 'prd-gen'
+                    ? { ...s, label: `${base} (${data.done}/${data.total} sections)` }
+                    : s));
+                break;
+            }
+            case 'warning':
+                setMessages(prev => [...prev, { id: 'warn-' + Date.now(), role: 'system', content: `⚠️ ${data.message}`, timestamp: new Date() }]);
+                break;
             case 'prd-complete':
                 onPRDReady(data.title, data.markdown);
                 setThinkingDone(true);
                 setSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
-                setMessages(prev => [...prev, { id: 'prd-done', role: 'system', content: `✅ PRD generated! ${data.sections?.length ?? 0} sections. View it in the right panel.`, timestamp: new Date() }]);
+                setMessages(prev => [...prev, { id: 'prd-done', role: 'system', content: `✅ PRD generated! ${data.sections?.length ?? 0} sections${data.missingSections?.length ? ` (${data.missingSections.length} incomplete)` : ''}. View it in the right panel.`, timestamp: new Date() }]);
                 break;
             case 'error':
                 setErrorMsg(parseErrorMessage(data.message));
@@ -268,7 +288,9 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
                             <p className="text-[13px] text-red-400/80 pl-7">{errorMsg}</p>
                         ) : (
                             <p className="text-[13px] text-[#DD830A]/80 pl-7">
-                                I&apos;ll generate a professional PRD using our 8-agent debate system. Let me plan and execute this.
+                                {mode === 'Plan'
+                                    ? "I'll generate a comprehensive architectural design and sprint plan. Let me plan and execute this."
+                                    : "I'll generate a professional PRD using our 8-agent debate system. Let me plan and execute this."}
                             </p>
                         )}
 

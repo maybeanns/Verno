@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { EventEmitter } from 'events';
 import { VernoArtifactService } from '../../services/artifact/VernoArtifactService';
+import { SandboxService } from '../../services/sandbox/SandboxService';
 
 const exec = util.promisify(childProcess.exec);
 
@@ -313,6 +314,9 @@ export class DeveloperAgent extends BaseAgent {
   async execute(context: IAgentContext): Promise<string> {
     this.log('🚀 Developer Agent (Amelia) — Claude Code-level execution starting');
 
+    const sandbox = new SandboxService();
+    let sandboxPath = '';
+
     if (context.workspaceRoot) {
       this.feedbackService = new FeedbackService(context.workspaceRoot);
 
@@ -321,13 +325,22 @@ export class DeveloperAgent extends BaseAgent {
       this.outputDir = this.resolveOutputDir(context.workspaceRoot, userRequest);
       this.log(`📁 Output directory: ${this.outputDir}`);
 
-      // Open persistent terminal session IN the output directory
-      this.terminal = new TerminalSession(this.outputDir, (msg) => this.log(msg));
-      await this.terminal.open();
-      this.log('✅ Terminal session opened');
+      // Create sandbox and copy files
+      try {
+        sandboxPath = await sandbox.createSandbox(this.outputDir);
+        this.log(`📦 Sandbox created at: ${sandboxPath}`);
+      } catch (sbErr) {
+        this.log(`Failed to create sandbox: ${sbErr}`, 'error');
+        sandboxPath = this.outputDir; // Fallback to outputDir directly
+      }
 
-      // Detect project environment ONCE upfront — check output dir
-      this.env = await this.detectProjectEnvironment(this.outputDir);
+      // Open persistent terminal session IN the sandbox directory
+      this.terminal = new TerminalSession(sandboxPath, (msg) => this.log(msg));
+      await this.terminal.open();
+      this.log('✅ Terminal session opened in sandbox');
+
+      // Detect project environment ONCE upfront — check sandbox dir
+      this.env = await this.detectProjectEnvironment(sandboxPath);
       this.log(`📊 Environment: ${JSON.stringify(this.env)}`);
     }
 
@@ -339,7 +352,7 @@ export class DeveloperAgent extends BaseAgent {
 
     try {
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        this.log(`\nΓöüΓöüΓöü Attempt ${attempt}/${MAX_RETRIES} ΓöüΓöüΓöü`);
+        this.log(`\n┏━━━━━━━━━ Attempt ${attempt}/${MAX_RETRIES} ━━━━━━━━━┓`);
 
         if (attempt > 1) {
           completedTasks.length = 0;
@@ -347,7 +360,7 @@ export class DeveloperAgent extends BaseAgent {
           // Keep issues for error context injection into next prompt
         }
 
-        // ΓöÇΓöÇ Context gathering ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        // ── Context gathering ───────────────────────────────────────────
         const prev = (context.metadata?.previousOutputs || {}) as Record<string, string>;
         const analysis = prev['analyst'] || '';
         const architecture = prev['architect'] || '';
@@ -356,7 +369,7 @@ export class DeveloperAgent extends BaseAgent {
         const editMode = !!context.metadata?.editMode;
         const userRequest = (context.metadata?.userRequest as string) || 'implement feature';
 
-        // ΓöÇΓöÇ Load all project documentation (.md files in root and .planning/)
+        // ── Load all project documentation (.md files in root and .planning/)
         const projectDocs = context.workspaceRoot
           ? this.loadAllProjectDocs(context.workspaceRoot, prev)
           : { prd: prev['pm'] || '', ux: prev['uxdesigner'] || '', auxiliary: '' };
@@ -365,21 +378,21 @@ export class DeveloperAgent extends BaseAgent {
         if (projectDocs.prd) this.log(`PRD loaded: ${projectDocs.prd.length} chars`);
         if (projectDocs.auxiliary) this.log(`Auxiliary docs loaded: ${projectDocs.auxiliary.length} chars`);
 
-        // ΓöÇΓöÇ RAG context retrieval ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        // ── RAG context retrieval ───────────────────────────────────────
         let existingFilesContext = '';
         if (context.workspaceRoot) {
           this.lazyInitRagServices(context.workspaceRoot);
           if (this.indexingService && this.contextEngine) {
-            this.log('≡ƒöì Building tiered code context...');
+            this.log('🔍 Building tiered code context...');
             // Background indexing
             void this.indexingService.indexWorkspace(context.workspaceRoot, this);
             // Synchronous tier 1+2 retrieval
             existingFilesContext = await this.contextEngine.getTieredContext(userRequest, 12);
-            this.log(`≡ƒôÜ Context: ${existingFilesContext.length} chars retrieved`);
+            this.log(`📚 Context: ${existingFilesContext.length} chars retrieved`);
           }
         }
 
-        // ΓöÇΓöÇ Filesystem snapshot for smarter context ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        // ── Filesystem snapshot for smarter context ────────────────────
         const fsSnapshot = context.workspaceRoot
           ? await this.buildFilesystemSnapshot(context.workspaceRoot)
           : '';
@@ -390,7 +403,7 @@ export class DeveloperAgent extends BaseAgent {
           /\.(ts|js|tsx|jsx|py|java|go|rs|rb|php|css|html)/.test(existingFilesContext);
         const hasExistingCode = hasActualSourceCode;
 
-        // ΓöÇΓöÇ Build prompt ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        // ── Build prompt ───────────────────────────────────────────────
         const errorContext = attempt > 1
           ? this.buildErrorContext(issues)
           : '';
@@ -404,7 +417,7 @@ export class DeveloperAgent extends BaseAgent {
         // Clear issues from previous attempt AFTER building error context
         if (attempt > 1) issues.length = 0;
 
-        // ΓöÇΓöÇ LLM generation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+        // ── LLM generation ─────────────────────────────────────────────
         let buffer = '';
         try {
           await this.llmService.streamGenerate(prompt, undefined, (token: string) => {
@@ -454,15 +467,14 @@ export class DeveloperAgent extends BaseAgent {
 
         if (!context.workspaceRoot) break;
 
-        // Use the resolved output directory for all file operations
-        const projectRoot = this.outputDir || context.workspaceRoot;
+        const targetRoot = sandboxPath || this.outputDir || context.workspaceRoot;
 
         // ── File writing ───────────────────────────────────────
         const generatedFiles = this.parseCodeFiles(buffer);
         this.log(`Parsed ${generatedFiles.length} file(s) from LLM output`);
 
         // Pre-validate TypeScript/JavaScript before writing
-        const preValidationIssues = await this.preValidateFiles(generatedFiles, projectRoot);
+        const preValidationIssues = await this.preValidateFiles(generatedFiles, targetRoot);
         if (preValidationIssues.length > 0) {
           issues.push(...preValidationIssues);
           this.log(`Pre-validation found ${preValidationIssues.length} issue(s) — will include in retry context`);
@@ -472,7 +484,6 @@ export class DeveloperAgent extends BaseAgent {
         // Post-parse validation: detect framework mixing and bad patterns
         const hasNextFiles = generatedFiles.some(f => f.name.includes('app/layout') || f.name.includes('next.config'));
         const hasReactRouter = generatedFiles.some(f => f.content.includes('react-router-dom') || f.content.includes('BrowserRouter'));
-        const hasReactDOMRender = generatedFiles.some(f => f.content.includes('ReactDOM.render') || f.content.includes('createRoot'));
 
         if (hasNextFiles && hasReactRouter) {
           this.log('⚠️ WARNING: Next.js project uses react-router-dom — stripping bad imports');
@@ -486,14 +497,7 @@ export class DeveloperAgent extends BaseAgent {
         // Filter out CRA patterns in Next.js projects
         if (hasNextFiles) {
           const craPatterns = ['app/index.tsx', 'app/App.tsx', 'app/routes.tsx', 'app/index.jsx', 'app/App.jsx'];
-          const beforeCount = generatedFiles.length;
-          const filtered = generatedFiles.filter(f => {
-            if (craPatterns.some(p => f.name.endsWith(p))) {
-              this.log(`⚠️ Filtered CRA pattern file from Next.js project: ${f.name}`);
-              return false;
-            }
-            return true;
-          });
+          const filtered = generatedFiles.filter(f => !craPatterns.some(p => f.name.endsWith(p)));
           generatedFiles.length = 0;
           generatedFiles.push(...filtered);
         }
@@ -505,7 +509,6 @@ export class DeveloperAgent extends BaseAgent {
             this.log(`⚠️ WARNING: Suspiciously short filename: ${f.name} — may be truncated`);
           }
         }
-
 
         const PLANNING_ARTIFACTS = new Set([
           'ANALYSIS.md', 'ARCHITECTURE.md', 'UX_DESIGN.md', 'PRD.md',
@@ -522,35 +525,54 @@ export class DeveloperAgent extends BaseAgent {
         });
         this.log(`📦 ${codeFiles.length} actual code files to write (filtered ${generatedFiles.length - codeFiles.length} planning artifacts)`);
 
-        await this.writeFiles(codeFiles, projectRoot, completedTasks, issues);
-
+        await this.writeFiles(codeFiles, targetRoot, completedTasks, issues);
 
         // ── Reconcile manifests ──────────────────────────────
-        await this.reconcileManifests(projectRoot, buffer, issues, suggestions);
+        await this.reconcileManifests(targetRoot, buffer, issues, suggestions);
 
         // ── Install dependencies ─────────────────────────────
-        await this.installDependencies(projectRoot, completedTasks, issues, suggestions);
+        await this.installDependencies(targetRoot, completedTasks, issues, suggestions);
 
         // ── Quality gates (parallel where safe) ──────────────
-        await this.runQualityGates(projectRoot, completedTasks, issues, suggestions);
+        await this.runQualityGates(targetRoot, completedTasks, issues, suggestions);
 
         // ── Security scan ────────────────────────────────────
-        await this.runSecurityScan(projectRoot, completedTasks, issues, suggestions);
+        await this.runSecurityScan(targetRoot, completedTasks, issues, suggestions);
 
-        // ── Git snapshot ─────────────────────────────────────
-        if (this.env?.hasGit) {
-          await this.gitSnapshot(projectRoot, `Amelia: ${userRequest.substring(0, 72)}`);
-        }
-
-        // Save implementation reference
-        const implPath = path.join(context.workspaceRoot, '.verno', 'IMPLEMENTATION.md');
+        // Save implementation reference inside sandbox
+        const implPath = path.join(targetRoot, '.verno', 'IMPLEMENTATION.md');
         await this.safeWriteFile(implPath, buffer);
         this.changeTracker.recordChange(implPath, buffer);
 
         // ── Self-healing check ─────────────────────────────────
         const fatals = issues.filter(i => i.severity === 'high' || i.severity === 'critical');
         if (fatals.length === 0) {
-          this.log(`Attempt ${attempt} succeeded — no fatal issues`);
+          this.log(`Attempt ${attempt} succeeded — no fatal issues. Syncing back to workspace...`);
+
+          const targetDir = this.outputDir || context.workspaceRoot;
+
+          // Sync back from sandbox to real output dir
+          if (sandboxPath && sandboxPath !== targetDir) {
+            const filePathsToSync = codeFiles.map(f => {
+              let cleanName = f.name;
+              if (this.outputDir) {
+                const outputFolderName = path.basename(this.outputDir);
+                if (cleanName.startsWith(outputFolderName + '/') || cleanName.startsWith(outputFolderName + '\\')) {
+                  cleanName = cleanName.substring(outputFolderName.length + 1);
+                }
+              }
+              return cleanName;
+            });
+            // Also sync IMPLEMENTATION.md
+            filePathsToSync.push('.verno/IMPLEMENTATION.md');
+            await sandbox.syncBack(targetDir, filePathsToSync);
+          }
+
+          // ── Git snapshot on real output dir ─────────────────────────────
+          if (this.env?.hasGit) {
+            await this.gitSnapshot(targetDir, `Amelia: ${userRequest.substring(0, 72)}`);
+          }
+
           break;
         }
 
@@ -563,9 +585,11 @@ export class DeveloperAgent extends BaseAgent {
       }
 
     } finally {
-      // Always close terminal
+      // Always close terminal and clean sandbox
       this.terminal?.close();
       this.log('Terminal session closed');
+      sandbox.clean();
+      this.log('Sandbox cleaned');
     }
 
     this.generateFeedback(completedTasks, issues, suggestions, context.workspaceRoot);
@@ -797,7 +821,17 @@ export class DeveloperAgent extends BaseAgent {
           fs.writeFileSync(tmpFile, file.content, 'utf-8');
 
           // Quick syntax check using acorn-like approach via node
-          const checkScript = `try { require('typescript') && require('typescript').createSourceFile('f${ext}', ${JSON.stringify(file.content)}, 99, true); console.log('ok'); } catch(e) { console.error(e.message); }`;
+          const checkScript = [
+            `try {`,
+            `  var ts = require('typescript');`,
+            `  var sf = ts.createSourceFile('f${ext}', ${JSON.stringify(file.content)}, ts.ScriptTarget.Latest, true);`,
+            `  var diags = sf.parseDiagnostics || [];`,
+            `  if (diags.length > 0) { console.error(diags.map(function(d){ return typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText; }).join('; ')); }`,
+            `  else { console.log('ok'); }`,
+            `} catch(e) {`,
+            `  if (e.code !== 'MODULE_NOT_FOUND') { console.error(e.message); }`,
+            `}`,
+          ].join(' ');
           try {
             const { stdout, stderr } = await exec(`node -e "${checkScript.replace(/"/g, '\\"')}"`, { cwd: workspaceRoot, timeout: 5000 });
             if (stderr && stderr.trim()) {

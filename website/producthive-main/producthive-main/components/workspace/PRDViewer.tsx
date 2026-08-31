@@ -191,6 +191,20 @@ function MarkdownRenderer({ content }: { content: string }) {
     let listOrdered = false;
     let blockquoteLines: string[] = [];
     let inBlockquote = false;
+    let paragraphLines: string[] = [];
+
+    const flushParagraph = () => {
+        if (paragraphLines.length > 0) {
+            elements.push(
+                <p
+                    key={`p-${elements.length}`}
+                    className="text-white/80 text-[14px] leading-relaxed mb-4"
+                    dangerouslySetInnerHTML={{ __html: inlineFormat(paragraphLines.join(' ')) }}
+                />
+            );
+            paragraphLines = [];
+        }
+    };
 
     const flushBlockquote = () => {
         if (blockquoteLines.length > 0) {
@@ -220,13 +234,41 @@ function MarkdownRenderer({ content }: { content: string }) {
 
     const flushTable = () => {
         if (tableLines.length >= 2) {
-            const headers = tableLines[0].split('|').map(h => h.trim()).filter(Boolean);
-            const rows = tableLines.slice(2).map(r => r.split('|').map(c => c.trim()).filter(Boolean));
+            const parseRow = (rowStr: string) => {
+                const trimmed = rowStr.trim();
+                let content = trimmed;
+                if (content.startsWith('|')) {
+                    content = content.slice(1);
+                }
+                if (content.endsWith('|')) {
+                    content = content.slice(0, -1);
+                }
+                return content.split('|').map(c => c.trim());
+            };
+
+            const headers = parseRow(tableLines[0]);
+            const rows = tableLines.slice(2).map(parseRow);
             elements.push(
                 <div key={`table-${elements.length}`} className="w-full overflow-x-auto mb-6">
                     <table className="w-full border-collapse text-left">
-                        <thead><tr>{headers.map((h, i) => <th key={i} className="bg-white/[0.04] px-4 py-2.5 text-[13px] font-semibold border border-white/[0.06] text-white/70">{h}</th>)}</tr></thead>
-                        <tbody>{rows.map((row, ri) => <tr key={ri}>{row.map((cell, ci) => <td key={ci} className="px-4 py-2 text-[13px] border border-white/[0.06] text-white/60" dangerouslySetInnerHTML={{ __html: inlineFormat(cell) }} />)}</tr>)}</tbody>
+                        <thead>
+                            <tr className="border-b border-white/[0.08]">
+                                {headers.map((h, i) => (
+                                    <th key={i} className="bg-white/[0.04] px-4 py-2.5 text-[13px] font-semibold border border-white/[0.06] text-white/70">
+                                        {h}
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map((row, ri) => (
+                                <tr key={ri} className="border-b border-white/[0.04] hover:bg-white/[0.01]">
+                                    {row.map((cell, ci) => (
+                                        <td key={ci} className="px-4 py-2 text-[13px] border border-white/[0.06] text-white/60" dangerouslySetInnerHTML={{ __html: inlineFormat(cell) }} />
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
                     </table>
                 </div>
             );
@@ -238,14 +280,17 @@ function MarkdownRenderer({ content }: { content: string }) {
         const line = lines[i];
 
         // Table handling
-        if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
-            if (!inTable) { flushList(); flushBlockquote(); inTable = true; }
-            tableLines.push(line); continue;
-        } else if (inTable) flushTable();
+        if (line.trim().startsWith('|')) {
+            if (!inTable) { flushParagraph(); flushList(); flushBlockquote(); inTable = true; }
+            tableLines.push(line);
+            continue;
+        } else if (inTable) {
+            flushTable();
+        }
 
         // Blockquote handling
         if (line.trim().startsWith('> ')) {
-            if (!inBlockquote) { flushList(); inBlockquote = true; }
+            if (!inBlockquote) { flushParagraph(); flushList(); inBlockquote = true; }
             blockquoteLines.push(line.trim().slice(2));
             continue;
         } else if (inBlockquote) {
@@ -253,26 +298,60 @@ function MarkdownRenderer({ content }: { content: string }) {
         }
 
         // Empty line
-        if (!line.trim()) { flushList(); continue; }
+        if (!line.trim()) {
+            flushParagraph();
+            flushList();
+            flushBlockquote();
+            continue;
+        }
 
         // Headings
-        if (line.startsWith('# ')) { flushList(); elements.push(<h1 key={i} className="text-2xl font-semibold text-white/90 border-b border-white/[0.06] pb-3 mb-6">{line.slice(2)}</h1>); continue; }
-        if (line.startsWith('## ')) { flushList(); elements.push(<h2 key={i} className="text-[17px] font-semibold text-[#DD830A] mt-8 mb-4">{line.slice(3)}</h2>); continue; }
-        if (line.startsWith('### ')) { flushList(); elements.push(<h3 key={i} className="text-[15px] font-medium text-white/70 mt-6 mb-3">{line.slice(4)}</h3>); continue; }
+        if (line.startsWith('# ')) {
+            flushParagraph();
+            flushList();
+            elements.push(<h1 key={i} className="text-2xl font-semibold text-white/90 border-b border-white/[0.06] pb-3 mb-6">{line.slice(2)}</h1>);
+            continue;
+        }
+        if (line.startsWith('## ')) {
+            flushParagraph();
+            flushList();
+            elements.push(<h2 key={i} className="text-[17px] font-semibold text-[#DD830A] mt-8 mb-4">{line.slice(3)}</h2>);
+            continue;
+        }
+        if (line.startsWith('### ')) {
+            flushParagraph();
+            flushList();
+            elements.push(<h3 key={i} className="text-[15px] font-medium text-white/70 mt-6 mb-3">{line.slice(4)}</h3>);
+            continue;
+        }
 
         // Horizontal rule
-        if (line.trim() === '---') { flushList(); elements.push(<hr key={i} className="border-white/[0.06] my-8" />); continue; }
+        if (line.trim() === '---') {
+            flushParagraph();
+            flushList();
+            elements.push(<hr key={i} className="border-white/[0.06] my-8" />);
+            continue;
+        }
 
         // Lists
         const ulMatch = line.match(/^(\s*)-\s+(.+)/);
         const olMatch = line.match(/^(\s*)\d+\.\s+(.+)/);
-        if (ulMatch) { if (!inList) { inList = true; listOrdered = false; } listItems.push(ulMatch[2]); continue; }
-        if (olMatch) { if (!inList) { inList = true; listOrdered = true; } listItems.push(olMatch[2]); continue; }
+        if (ulMatch || olMatch) {
+            flushParagraph();
+            if (!inList) {
+                inList = true;
+                listOrdered = !!olMatch;
+            }
+            listItems.push(ulMatch ? ulMatch[2] : olMatch![2]);
+            continue;
+        }
 
-        // Paragraph
+        // Paragraph line accumulation
         flushList();
-        elements.push(<p key={i} className="text-white/80 text-[14px] leading-relaxed mb-4" dangerouslySetInnerHTML={{ __html: inlineFormat(line) }} />);
+        flushBlockquote();
+        paragraphLines.push(line);
     }
+    flushParagraph();
     flushList();
     flushBlockquote();
     if (inTable) flushTable();

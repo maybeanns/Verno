@@ -30,6 +30,7 @@ interface WorkspaceLayoutProps {
     jobId?: string;
     model?: string;
     visibility?: string;
+    fastTrack?: boolean;
 }
 
 export default function WorkspaceLayout({
@@ -39,6 +40,7 @@ export default function WorkspaceLayout({
     jobId,
     model,
     visibility,
+    fastTrack,
 }: WorkspaceLayoutProps) {
     // ── Route to DevWorkspaceLayout for Develop mode ──────────────────────
     if (mode === 'Develop') {
@@ -136,6 +138,7 @@ export default function WorkspaceLayout({
                         model={model}
                         agents={agents}
                         onPRDReady={handlePRDReady}
+                        fastTrack={fastTrack}
                     />
                 </motion.div>
 

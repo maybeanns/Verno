@@ -24,6 +24,6 @@
 		"dist",
 		"tests",
 		".test-workspace",
-		"**/*.test.ts"
+		"**/__tests__/**"
 	]
 }

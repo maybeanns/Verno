@@ -268,6 +268,7 @@ export default function MainInput() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [selectedType, setSelectedType] = useState<ProjectType>('Full Stack App');
     const [operationalMode, setOperationalMode] = useState<OperationalMode>('SDLC');
+    const fastTrack = operationalMode !== 'SDLC';
     const [showModes, setShowModes] = useState(false);
     const modeBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -416,19 +417,21 @@ export default function MainInput() {
                     modelId: activeModel?.id ?? '',
                     userKeys: Object.keys(userKeys).length ? userKeys : undefined,
                     maxRounds: 3,
+                    fastTrack,
                 }),
             });
 
             const data = res.ok ? await res.json() : {};
             const params = new URLSearchParams({
                 q: input, type: selectedType, mode: operationalMode,
+                fastTrack: fastTrack.toString(),
                 ...(data.jobId ? { jobId: data.jobId } : {}),
                 ...(activeModel ? { model: activeModel.id } : {}),
                 visibility: isPublic ? 'public' : 'private',
             });
             router.push(`/workspace?${params}`);
         } catch {
-            router.push(`/workspace?${new URLSearchParams({ q: input, type: selectedType, mode: operationalMode })}`);
+            router.push(`/workspace?${new URLSearchParams({ q: input, type: selectedType, mode: operationalMode, fastTrack: fastTrack.toString() })}`);
         } finally {
             setIsSubmitting(false);
         }

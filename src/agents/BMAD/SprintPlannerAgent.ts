@@ -9,6 +9,8 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { Story, Epic } from '../../types/sdlc';
 import { SprintPlan, Sprint } from '../../types/sprint';
 import { VernoArtifactService } from '../../services/artifact/VernoArtifactService';
@@ -51,7 +53,11 @@ export class SprintPlannerAgent {
         // Generate post-planning artifacts
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (root) {
-            this.traceService.generateMatrix(root, epics);
+            const vernoPrdRelativePath = path.join('.verno', 'PRD.md');
+            const hasVernoPrd = fs.existsSync(path.join(root, vernoPrdRelativePath));
+            const prdPath = hasVernoPrd ? vernoPrdRelativePath : 'PRD.md';
+            
+            this.traceService.generateMatrix(root, epics, prdPath);
             this.depGraphService.generateMermaidGraph(root, allStories);
         }
         

@@ -38,20 +38,7 @@ suite('DeveloperAgent Test Suite', () => {
   });
 
   test('should execute successfully when provided valid implementation plan', async () => {
-    // We enqueue a mock response that the DeveloperAgent would parse
-    const mockJsonOutput = JSON.stringify({
-      blocks: [
-        {
-          file: 'src/index.ts',
-          code: 'export const run = () => true;'
-        }
-      ],
-      dependencies: [],
-      tests: [],
-      explanation: 'Implemented run function.'
-    });
-
-    const mockResponseText = `Here is your code:\n\`\`\`json\n${mockJsonOutput}\n\`\`\`\n`;
+    const mockResponseText = "Here is your code:\n```FILE: src/index.ts\nexport const run = () => true;\n```\n";
     mockLLMProvider.enqueueResponse(mockResponseText);
 
     const context: IAgentContext = {
@@ -64,11 +51,18 @@ suite('DeveloperAgent Test Suite', () => {
 
     // Stubbings to prevent real Git or sub-processes natively invoked by agent
     sinon.stub(developerAgent as any, 'lazyInitRagServices').returns(undefined);
+    sinon.stub(developerAgent as any, 'detectProjectEnvironment').resolves({
+      hasNode: false, hasPython: false, hasGo: false, hasRust: false,
+      hasDotnet: false, hasJava: false, hasDocker: false, hasGit: false,
+      packageManager: null, pythonBin: 'python3', nodeVersion: '',
+      frameworks: [], testRunner: null, linter: null, formatter: null, bundler: null,
+    });
+    sinon.stub(developerAgent as any, 'writeFiles').resolves();
 
     const result = await developerAgent.execute(context);
     
     assert.strictEqual(typeof result, 'string');
-    assert.ok(result.includes('Implementation completed successfully'), 'Agent should report completion');
+    assert.ok(result.includes('export const run'), 'Agent should return generated code');
   });
 
   test('should bubble error when LLM provider fails', async () => {

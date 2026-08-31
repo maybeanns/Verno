@@ -12,6 +12,7 @@ import { validateWebviewMessage, generateNonce } from '../utils/webviewSecurity'
 import { VernoArtifactService } from '../services/artifact/VernoArtifactService';
 import { SprintPlannerAgent } from '../agents/BMAD/SprintPlannerAgent';
 import { SprintPlan } from '../types/sprint';
+import { EstimationAgent } from '../agents/specialized/EstimationAgent';
 
 /** Allowlist of message types accepted by the SDLC panel. */
 const SDLC_ALLOWED_TYPES = [
@@ -260,8 +261,16 @@ Respond ONLY with valid JSON matching this structure:
             }
 
             this.state.epics = JSON.parse(prdJson);
+
+            // Run dedicated EstimationAgent to estimate story points
+            const root = this.getWorkspaceRoot();
+            if (root) {
+                this.logger.info('[SDLCWebviewPanel] Running EstimationAgent sub-agent for story points...');
+                const estimator = new EstimationAgent(this.logger, this.llmService);
+                await estimator.execute({ workspaceRoot: root } as any, this.state.epics);
+            }
+
             if (!this.artifacts) {
-                const root = this.getWorkspaceRoot();
                 if (root) { this.artifacts = new VernoArtifactService(root); }
             }
             if (this.artifacts) {

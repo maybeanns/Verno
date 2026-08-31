@@ -4,8 +4,8 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
   }
 
   body {
@@ -17,11 +17,11 @@
 
 @layer utilities {
   .glass {
-    @apply bg-white/60 backdrop-blur-xl border border-black/5 shadow-sm;
+    @apply bg-black/40 backdrop-blur-xl border border-white/[0.08] shadow-sm;
   }
 
   .glass-strong {
-    @apply bg-white/80 backdrop-blur-2xl border border-black/10 shadow-md;
+    @apply bg-black/60 backdrop-blur-2xl border border-white/[0.15] shadow-md;
   }
 
   .text-gradient {

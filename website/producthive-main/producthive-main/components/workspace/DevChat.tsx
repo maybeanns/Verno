@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Send, Loader2, Sparkles, Check, AlertCircle, ChevronRight, Code2, Layers, Shield, Package } from 'lucide-react';
+import { Send, Loader2, Sparkles, Check, AlertCircle, ChevronRight, Code2, Layers, Shield, Package, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { loadSettings } from '@/components/landing/SettingsPanel';
 import type { GeneratedFile } from './CodePanel';
@@ -31,6 +31,7 @@ interface DevChatProps {
     onFileStreaming: (path: string | null) => void;
     onGeneratingChange: (generating: boolean) => void;
     onProjectNameChange: (name: string) => void;
+    saveSnapshot?: () => void;
 }
 
 // ── Step definitions ─────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ const CODEGEN_STEPS: Omit<ThinkingStep, 'status'>[] = [
     { id: 'architect', label: 'Planning architecture', icon: <Layers className="w-3.5 h-3.5" /> },
     { id: 'codegen', label: 'Generating code files', icon: <Code2 className="w-3.5 h-3.5" /> },
     { id: 'security', label: 'Security review', icon: <Shield className="w-3.5 h-3.5" /> },
+    { id: 'validate', label: 'Validating & fixing code', icon: <CheckCircle className="w-3.5 h-3.5" /> },
     { id: 'complete', label: 'Build complete', icon: <Package className="w-3.5 h-3.5" /> },
 ];
 
@@ -71,6 +73,7 @@ export default function DevChat({
     onFileStreaming,
     onGeneratingChange,
     onProjectNameChange,
+    saveSnapshot,
 }: DevChatProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
@@ -92,9 +95,38 @@ export default function DevChat({
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }, [messages, steps]);
 
-    // ── Auto-start code generation ──────────────────────────────────────
+    // Save chat history
+    useEffect(() => {
+        if (messages.length > 1) {
+            localStorage.setItem(`producthive-chat-${query}`, JSON.stringify(messages));
+        }
+    }, [messages, query]);
+
+    // ── Auto-start / Restore code generation ────────────────────────────
 
     useEffect(() => {
+        const savedChat = localStorage.getItem(`producthive-chat-${query}`);
+        if (savedChat) {
+            try {
+                const parsed = JSON.parse(savedChat);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    setMessages(parsed);
+                    setBuildDone(true);
+                    
+                    const savedFiles = localStorage.getItem(`producthive-files-${query}`);
+                    if (savedFiles) {
+                        const parsedFiles = JSON.parse(savedFiles);
+                        generatedFilesRef.current = parsedFiles;
+                        onFilesGenerated(parsedFiles);
+                    }
+                    
+                    setSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
+                    onGeneratingChange(false);
+                    return;
+                }
+            } catch (e) {}
+        }
+
         setMessages([{ id: 'init', role: 'user', content: query, timestamp: new Date() }]);
         const creds = detectProvider();
         if (!creds) {
@@ -118,7 +150,14 @@ export default function DevChat({
 
     // ── SSE Stream handler ──────────────────────────────────────────────
 
-    async function runCodegenStream(provider: string, apiKey: string, signal: AbortSignal, model?: string) {
+    async function runCodegenStream(
+        provider: string,
+        apiKey: string,
+        signal: AbortSignal,
+        model?: string,
+        mode: 'generate' | 'edit' = 'generate',
+        prompt?: string
+    ) {
         try {
             const res = await fetch('/api/codegen', {
                 method: 'POST',
@@ -129,6 +168,9 @@ export default function DevChat({
                     apiKey,
                     projectType,
                     model,
+                    mode,
+                    prompt,
+                    existingFiles: generatedFilesRef.current,
                 }),
                 signal,
             });
@@ -176,7 +218,12 @@ export default function DevChat({
         switch (event) {
             case 'phase': {
                 const stepMap: Record<string, number> = {
-                    architect: 0, codegen: 1, security: 2, complete: 3
+                    architect: 0,
+                    'edit-plan': 0,
+                    codegen: 1,
+                    security: 2,
+                    validate: 3,
+                    complete: 4
                 };
                 const idx = stepMap[data.phase];
                 if (idx !== undefined) {
@@ -234,7 +281,14 @@ export default function DevChat({
                     content: data.content,
                     language: data.language,
                 };
-                generatedFilesRef.current = [...generatedFilesRef.current, file];
+                const exists = generatedFilesRef.current.some(f => f.path === file.path);
+                if (exists) {
+                    generatedFilesRef.current = generatedFilesRef.current.map(f =>
+                        f.path === file.path ? file : f
+                    );
+                } else {
+                    generatedFilesRef.current = [...generatedFilesRef.current, file];
+                }
                 onFilesGenerated([...generatedFilesRef.current]);
                 onFileStreaming(null);
                 setCurrentFileName(null);
@@ -293,27 +347,57 @@ export default function DevChat({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim() || isSubmitting) return;
-        const userMsg: Message = {
-            id: Date.now().toString(),
-            role: 'user',
-            content: input.trim(),
-            timestamp: new Date(),
-        };
-        setMessages(prev => [...prev, userMsg]);
         const userInput = input.trim();
         setInput('');
         setIsSubmitting(true);
 
-        // For follow-up prompts, regenerate with context
-        setTimeout(() => {
+        const userMsg: Message = {
+            id: Date.now().toString(),
+            role: 'user',
+            content: userInput,
+            timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, userMsg]);
+
+        if (saveSnapshot) saveSnapshot();
+
+        const creds = detectProvider();
+        if (!creds) {
             setMessages(prev => [...prev, {
-                id: `resp-${Date.now()}`,
-                role: 'assistant',
-                content: getFollowUpReply(userInput),
+                id: `err-${Date.now()}`,
+                role: 'system',
+                content: '⚠️ No API key found. Please configure one in Settings.',
                 timestamp: new Date(),
             }]);
             setIsSubmitting(false);
-        }, 1000);
+            return;
+        }
+
+        setSteps(prev => prev.map((s, i) => ({
+            ...s,
+            status: i === 0 ? 'active' as const : 'pending' as const
+        })));
+        setBuildDone(false);
+        onGeneratingChange(true);
+
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        try {
+            await runCodegenStream(creds.provider, creds.apiKey, controller.signal, creds.model, 'edit', userInput);
+            setBuildDone(true);
+            onGeneratingChange(false);
+            setMessages(prev => [...prev, {
+                id: `resp-${Date.now()}`,
+                role: 'assistant',
+                content: 'Patches applied successfully. Check the preview to see your changes!',
+                timestamp: new Date(),
+            }]);
+        } catch (err: any) {
+            // Already reported
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     // ── Render ───────────────────────────────────────────────────────────

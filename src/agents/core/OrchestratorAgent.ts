@@ -170,7 +170,7 @@ export class OrchestratorAgent extends BaseAgent {
         if (!this.planStateService) {
             this.initializeEnhancedServices(workspaceRoot);
         }
-        const planState = this.planStateService!.loadPlanState();
+        const planState = this.planStateService ? this.planStateService.loadPlanState() : null;
         const conversationHistory = (agentContext.metadata?.conversationHistory as string) || '';
 
         let codeOutput: string;
@@ -540,7 +540,7 @@ export class OrchestratorAgent extends BaseAgent {
         this.log('No code or agent responses — running full PLAN + CODE pipeline');
         await this.executePlan(context);
         // Reload the plan state after planning
-        const newPlanState = this.planStateService!.loadPlanState();
+        const newPlanState = this.planStateService ? this.planStateService.loadPlanState() : null;
         if (newPlanState) {
           return await this.runPendingCodingAgents(context, newPlanState, conversationHistory);
         }
@@ -942,6 +942,10 @@ export class OrchestratorAgent extends BaseAgent {
     try {
       const codeResult = await devAgent.execute(devContext);
       results.push(`\n## 💻 Code Changes\n${codeResult}`);
+
+      // Run code review + self-healing after every edit, mirroring the full pipeline
+      const editOutputs: Record<string, string> = { developer: codeResult };
+      await this.runCodeReviewWithRetry(devContext, editOutputs, results, conversationHistory, projectContext);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       results.push(`\n## ❌ Code Edit Failed\n${errMsg}`);
@@ -993,6 +997,10 @@ export class OrchestratorAgent extends BaseAgent {
     try {
       const codeResult = await devAgent.execute(devContext);
       results.push(`\n## 💻 Code Changes\n${codeResult}`);
+
+      // Run code review + self-healing after every edit, mirroring the full pipeline
+      const editOutputs: Record<string, string> = { ...planState.agentOutputs, developer: codeResult };
+      await this.runCodeReviewWithRetry(devContext, editOutputs, results, conversationHistory, projectContext);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       results.push(`\n## ❌ Code Edit Failed\n${errMsg}`);

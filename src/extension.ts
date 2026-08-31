@@ -37,6 +37,11 @@ import { registerDocumentationCommands } from './commands/DocumentationCommands'
 import { WelcomePanel } from './ui/onboarding/WelcomePanel';
 import { JiraSetupWebview } from './jira/JiraSetupWebview';
 import { JiraAuthService } from './jira/JiraAuthService';
+// ── Architectural Overhaul: New Pillar Services ─────────────────────────────────
+import { registerBuiltinTools, globalToolRegistry } from './services/tools';
+import { CheckpointStore } from './services/workflow/CheckpointStore';
+import { VernoChatParticipant } from './ui/VernoChatParticipant';
+import { VernoDiagnosticProvider } from './ui/VernoDiagnosticProvider';
 
 let logger: Logger;
 let configService: ConfigService;
@@ -589,6 +594,55 @@ export async function activate(context: vscode.ExtensionContext) {
 		const setupJiraCmd = vscode.commands.registerCommand('verno.setupJira', () => {
 			JiraSetupWebview.createOrShow(context, logger);
 		});
+
+		// ── Pillar 2: Register built-in tools into the global ToolRegistry ──────
+		registerBuiltinTools(globalToolRegistry);
+		logger.info(`[ToolRegistry] ${globalToolRegistry.list().length} built-in tools registered.`);
+
+		// ── Pillar 1: Checkpoint store for durable pipeline resumption ──────────
+		const checkpointStore = workspaceRoot
+			? new CheckpointStore(workspaceRoot)
+			: null;
+
+		if (checkpointStore) {
+			const interruptedRuns = checkpointStore.listRuns();
+			if (interruptedRuns.length > 0) {
+				const runSummary = interruptedRuns.map(r => `"${r.topic.slice(0, 40)}"`).join(', ');
+				vscode.window.showInformationMessage(
+					`Verno: ${interruptedRuns.length} interrupted pipeline run(s) found: ${runSummary}. Use @verno /status to resume.`,
+					'Open Chat',
+				).then(choice => {
+					if (choice === 'Open Chat') {
+						vscode.commands.executeCommand('workbench.panel.chat.view.copilot.focus');
+					}
+				});
+			}
+		}
+
+		// ── Pillar 5: VS Code Native Chat Participant (@verno) ─────────────────
+		// Gate behind VS Code version check — requires ^1.90.0 for vscode.chat API.
+		const [majorStr, minorStr] = vscode.version.split('.');
+		const vscMajor = parseInt(majorStr ?? '0', 10);
+		const vscMinor = parseInt(minorStr ?? '0', 10);
+		const chatApiAvailable = vscMajor > 1 || (vscMajor === 1 && vscMinor >= 90);
+
+		let vernoChatParticipant: VernoChatParticipant | null = null;
+		const vernoDiagnostics = new VernoDiagnosticProvider();
+		context.subscriptions.push({ dispose: () => vernoDiagnostics.dispose() });
+
+		if (chatApiAvailable && checkpointStore) {
+			vernoChatParticipant = new VernoChatParticipant(
+				llmService,
+				agentRegistry,
+				checkpointStore,
+				logger,
+			);
+			vernoChatParticipant.register(context);
+			context.subscriptions.push({ dispose: () => vernoChatParticipant!.dispose() });
+			logger.info('[VernoChatParticipant] @verno chat participant registered.');
+		} else if (!chatApiAvailable) {
+			logger.info('[VernoChatParticipant] VS Code <1.90 detected — skipping @verno chat participant. Webview remains active.');
+		}
 
 		// Bug 2 fix: command that SidebarProvider calls on webview mount to eagerly
 		// initialize the LLM provider before the user clicks any button.

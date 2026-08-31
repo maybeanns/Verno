@@ -10,28 +10,28 @@ const config: Config = {
     theme: {
         extend: {
             colors: {
-                background: '#FFFFFF',
-                foreground: '#0A0A0A',
+                background: '#09090B',
+                foreground: '#FAFAFA',
                 primary: {
-                    DEFAULT: '#D97706', // Amber-600 (Darker for light mode contrast)
-                    foreground: '#FFFFFF',
+                    DEFAULT: '#F59E0B', // Amber-500 (Golden on dark mode)
+                    foreground: '#09090B',
                 },
                 secondary: {
-                    DEFAULT: '#B45309', // Amber-700
-                    foreground: '#FFFFFF',
+                    DEFAULT: '#D97706', // Amber-600
+                    foreground: '#FAFAFA',
                 },
                 accent: {
-                    DEFAULT: '#F59E0B', // Amber-500
-                    foreground: '#0A0A0A',
+                    DEFAULT: '#FBBF24', // Amber-400
+                    foreground: '#09090B',
                 },
                 muted: {
-                    DEFAULT: '#F4F4F5',
-                    foreground: '#71717A',
+                    DEFAULT: '#18181B',
+                    foreground: '#A1A1AA',
                 },
-                border: '#E4E4E7',
+                border: '#27272A',
                 card: {
-                    DEFAULT: '#FFFFFF',
-                    foreground: '#0A0A0A',
+                    DEFAULT: '#0F0F12',
+                    foreground: '#FAFAFA',
                 },
             },
             fontFamily: {

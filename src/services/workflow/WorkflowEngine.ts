@@ -1,9 +1,16 @@
 /**
- * Workflow execution engine
+ * WorkflowEngine — simple sequential step executor (backward-compatible).
+ *
+ * For durable, checkpoint-resumable execution of the full SDLC pipeline,
+ * use DurableWorkflowEngine instead.
  */
 
-import { IWorkflow, IAgentContext } from '../../types';
+import { IWorkflow } from '../../types';
 import { AgentRegistry } from '../../agents';
+
+// Re-export the new durable engine so callers can import from one place
+export { DurableWorkflowEngine } from './DurableWorkflowEngine';
+export { CheckpointStore } from './CheckpointStore';
 
 export class WorkflowEngine {
   constructor(private agentRegistry: AgentRegistry) {}

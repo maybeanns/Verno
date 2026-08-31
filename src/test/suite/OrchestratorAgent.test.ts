@@ -31,7 +31,7 @@ suite('OrchestratorAgent Test Suite', () => {
     sinon.stub(fileService, 'createFile').resolves();
     
     changeTracker = new FileChangeTracker();
-    agentRegistry = new AgentRegistry(logger);
+    agentRegistry = new AgentRegistry();
     
     orchestratorAgent = new OrchestratorAgent(
       logger,

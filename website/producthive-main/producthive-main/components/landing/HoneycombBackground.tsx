@@ -33,8 +33,8 @@ const HoneycombBackground = () => {
 const HexagonPattern = ({ id }: { id: string }) => {
     return (
         <svg
-            className="absolute inset-0 w-full h-full text-gray-600"
-            style={{ opacity: 0.15 }} // Subtle opacity
+            className="absolute inset-0 w-full h-full text-amber-500"
+            style={{ opacity: 0.12 }} // Subtle opacity
         >
             <defs>
                 <pattern

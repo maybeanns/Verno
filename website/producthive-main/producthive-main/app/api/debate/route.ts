@@ -2,9 +2,9 @@
  * POST /api/debate — 8-agent multi-round PRD debate engine (SSE stream).
  *
  * This mirrors the extension's DebateOrchestrator exactly:
- *   Phase A: 3-round debate among 8 agents
+ *   Phase A: 2-round debate among 8 agents
  *   Phase B: PM convergence / consensus
- *   Phase C: PRD generation (structured JSON)
+ *   Phase C: PRD generation (structured JSON, generated in batches)
  *   Phase D: Security & Compliance pass
  *
  * Agents:
@@ -19,6 +19,144 @@
  */
 
 import { NextRequest } from 'next/server';
+
+import {
+    extractSections,
+    titleKey,
+    type PRDSection,
+} from '@/lib/prd/sections';
+
+// ─── Document section catalog ───────────────────────────────────────────────
+// Single source of truth for both the Fast Track and the full-debate path, so
+// the two can no longer drift apart.
+
+interface SectionSpec {
+    title: string;
+    brief: string;
+}
+
+const ENFORCED_STACK = `ENFORCED STACK:
+- React 18+ with TypeScript (Vite is strictly used as the frontend build tool/bundler)
+- Tailwind CSS for styling
+- shadcn/ui for UI components
+- Supabase for backend (auth, database, storage) or a custom Node.js/Express backend where appropriate`;
+
+const PRD_SECTIONS: SectionSpec[] = [
+    {
+        title: 'EXECUTIVE SUMMARY',
+        brief: 'Product vision (1 paragraph), problem being solved, proposed solution, target market/TAM estimate, and 3-5 KPIs.',
+    },
+    {
+        title: 'PROBLEM STATEMENT',
+        brief: 'Current pain points with evidence/data, who is affected and how severely, cost of the problem (time, money, risk), and why existing solutions fail.',
+    },
+    {
+        title: 'USER PERSONAS',
+        brief: 'Define minimum 3 distinct, specific personas (Name, role, company size, goals, motivations, pain points, technical proficiency, budget authority) and key user stories in "As a [persona], I want to... so that..." format.',
+    },
+    {
+        title: 'GOALS, NON-GOALS & CONSTRAINTS',
+        brief: 'Explicit goals with measurable outcomes, explicit non-goals (what this product will NOT do and why), technical, business, and regulatory constraints.',
+    },
+    {
+        title: 'BUSINESS STRATEGY',
+        brief: "Pricing model table with all tier definitions and limits, priced appropriately for this product's actual market. Free tier rate limits and abuse prevention strategy tied to this product's real cost drivers. Competitive landscape naming at least 5 real products that genuinely compete in THIS product's category — do not name tools from unrelated markets. Differentiation and moat, GTM plan (Alpha, Beta, GA with dates), revenue model and path to $1M ARR.",
+    },
+    {
+        title: 'TECHNICAL ARCHITECTURE',
+        brief: 'System architecture diagram description (frontend, API gateway, services, workers, DB, cache, storage). Tech stack with version numbers and justifications. Infrastructure spec (cloud provider, regions, containerization, orchestration, environment strategy dev/staging/prod). Scalability plan (horizontal scaling, load balancing, auto-scaling triggers). Dependency map table (third-party services/libraries with license types and risk flags). Monitoring and observability (logging, APM, alerting). Backup and disaster recovery plan (RPO and RTO targets). CRITICAL: Vite is strictly a frontend build tool/bundler; the API Gateway and backend/worker microservices MUST NOT be built using or described as running on Vite. Specify actual backend technologies (e.g., Kong, Supabase Edge Functions, Node.js).',
+    },
+    {
+        title: 'API SPECIFICATION',
+        brief: 'Full endpoint list table (method, path, auth required, rate limit). Request and response payload schemas for every endpoint. Auth flow detail (OAuth2 scopes, JWT expiry, refresh strategy, SSO/SAML for enterprise). Error codes and response format for all failure states. Webhook spec if applicable. Rate limiting rules per tier. Versioning strategy.',
+    },
+    {
+        title: 'DATA MODEL',
+        brief: 'All database tables/collections with field names, types, constraints, and indexes. Entity relationship description and data flow diagram description.',
+    },
+    {
+        title: 'CORE FEATURES & FUNCTIONAL REQUIREMENTS',
+        brief: "For each core feature: name, description, functional requirements (numbered, testable using 'SHALL', 'SHOULD', 'MAY'), acceptance criteria (Given/When/Then format), edge cases & error states, and dependencies on other features.",
+    },
+    {
+        title: 'UX & DESIGN REQUIREMENTS',
+        brief: 'Key screen list with layout description, user flow for each core journey, accessibility standard (WCAG 2.1 AA minimum), localization requirements (languages, RTL support), design system/component library to be used, and responsive breakpoints.',
+    },
+    {
+        title: 'DATA HANDLING & PRIVACY',
+        brief: 'Data classification schema table (public, internal, confidential, restricted), encryption spec (AES-256 rest, TLS 1.3 minimum in-transit), data retention policy per type, GDPR implementation checklist (consent, erasure, portability, DPA, DPIA), other applicable compliance (justify HIPAA scope explicitly — if no PHI is handled, state so plainly rather than adding compliance bloat; SOC2, PCI-DSS where relevant), and data residency requirements.',
+    },
+    {
+        title: 'SECURITY & THREAT MODEL',
+        brief: 'STRIDE threat enumeration for each major component, attack surface map, specific mitigations for each threat, auth and authorization model (RBAC definitions), secret management strategy, penetration testing plan, and vulnerability disclosure policy.',
+    },
+    {
+        title: 'BILLING & SUBSCRIPTION MANAGEMENT',
+        brief: 'Subscription lifecycle (create, upgrade, downgrade, cancel), payment provider (e.g. Stripe) and integration spec, proration logic, failed payment handling, invoice and receipt spec.',
+    },
+    {
+        title: 'SUCCESS METRICS & ACCEPTANCE CRITERIA',
+        brief: 'KPIs with baseline, target (must have numbers), and measurement method. Definition of done for the MVP. Acceptance criteria per feature (measurable, not vague). Latency targets (separate interactive UI/API response target < 200ms p95 from any background task duration). Error rate thresholds. Load testing requirements (concurrent users, throughput).',
+    },
+    {
+        title: 'ROADMAP & RELEASE PLAN',
+        brief: '3 phases (MVP, Phase 2, Phase 3) formatted as a Markdown table with timeline start and end dates. Each phase MUST enumerate a concrete list of scope/features to be built with a 2-3 sentence description, team ownership per feature, dependencies, blockers, and phase launch criteria.',
+    },
+    {
+        title: 'SLA, SUPPORT & OPERATIONS',
+        brief: 'Uptime target (e.g. 99.9%) with measurement method, incident severity definitions (P0-P3), incident response and escalation procedure, support channels per tier, SLA response and resolution times table per tier and severity, on-call rotation plan, and runbook reference list.',
+    },
+    {
+        title: 'TEST PLAN & QA STRATEGY',
+        brief: 'Test types required (unit, integration, E2E, load, security), coverage targets per type, test environment strategy, regression testing approach, and performance benchmarks to pass before release.',
+    },
+    {
+        title: 'RISKS & MITIGATIONS',
+        brief: 'Risk register table: for each risk include probability (H/M/L), impact (H/M/L), owner, mitigation, and contingency. Must cover technical, business, compliance, security, and reputational risks.',
+    },
+    {
+        title: 'OPEN QUESTIONS & DECISIONS LOG',
+        brief: 'Unresolved decisions with owner and due date, all assumptions made (explicitly flagged), and decisions already made with rationale.',
+    },
+];
+
+const PLAN_SECTIONS: SectionSpec[] = [
+    {
+        title: 'EXECUTIVE SYSTEM DESIGN',
+        brief: 'System overview, high-level architectural style (monolith, microservices, serverless), detailed tech stack choices with versions and justifications, and core design constraints.',
+    },
+    {
+        title: 'INFRASTRUCTURE & ENVIRONMENT SPEC',
+        brief: 'Hosting infrastructure specs (cloud provider, regions, edge networks), containerization (Docker, Docker Compose), CI/CD deployment pipeline steps, and environment strategy (dev, staging, production).',
+    },
+    {
+        title: 'DATA MODEL & SCHEMA DESIGN',
+        brief: 'Databases (relational/NoSQL), comprehensive SQL schemas or collection definitions (tables, field names, types, primary/foreign keys, constraints, and indexes), and entity relationship description.',
+    },
+    {
+        title: 'API ARCHITECTURE & SPEC',
+        brief: 'Full REST/GraphQL/tRPC endpoint catalog table (Method, Path, Auth Required, Description). Detailed request and response payload JSON schemas for core operations, authentication flow (JWT, OAuth2, session storage), and rate limiting policies.',
+    },
+    {
+        title: 'FRONTEND COMPONENT TREE',
+        brief: 'Folder structure, design system components (shadcn/ui), routing layout, responsive design strategy, and state management (Zustand, Redux, Context).',
+    },
+    {
+        title: 'AGILE SPRINT ROADMAP',
+        brief: 'Epic/story breakdown, story point estimation criteria, sprint decomposition (minimum 3 sprints with scope and launch criteria), and task assignments specifically distributed among the 8 BMAD agents (Mary/Analyst, Winston/Architect, Sally/UX, Amelia/Developer, PM, QA, Techwriter, Security).',
+    },
+];
+
+const QUALITY_RULES = `QUALITY RULES:
+- Ground every detail in the actual topic. Never carry over examples, competitor names, metrics, or threat scenarios from an unrelated product domain.
+- Use tables wherever lists of items have multiple attributes.
+- Use Given/When/Then for all acceptance criteria.
+- Every KPI must have a number, not just a direction.
+- No vague language: replace "fast", "secure", "scalable" with specific measurable targets.
+- Flag any section where an assumption was made.
+- Write each section in full depth — an engineering team must be able to build from it without asking clarifying questions.
+- Never mix frontend build systems (Vite) with backend gateways or runtimes in architectural specifications.
+- Enforce TLS 1.3 minimum for all in-transit communications.`;
 
 // ─── Agent definitions (identical to extension) ─────────────────────────────
 
@@ -67,14 +205,6 @@ interface DebateMessage {
     round: number;
     timestamp: number;
     type: 'argument' | 'counter' | 'consensus';
-}
-
-// ─── PRD types (identical to extension) ─────────────────────────────────────
-
-interface PRDSection {
-    title: string;
-    content: string;
-    complianceFlags?: string[];
 }
 
 // ─── LLM Call abstraction ───────────────────────────────────────────────────
@@ -206,45 +336,6 @@ async function callLLM(
     return data.choices?.[0]?.message?.content?.trim() ?? '';
 }
 
-
-// ─── Prompt builders ────────────────────────────────────────────────────────
-
-// Per-agent deep-dive instructions — tells each agent EXACTLY what specifics to provide
-const AGENT_SPECIFICS: Record<string, { r1: string; r2: string }> = {
-    analyst: {
-        r1: 'Define 3 distinct, specific user personas (Name, Role, Context, Pain point). E.g., not "developers" but "Sarah, Freelance Dev: needs 1-page PDF for client handoff". Define a concrete pricing proposal (e.g., freemium with $29/mo tier vs per-scan). State competitive positioning: why pick this over Qualys/Rapid7/ZAP? What is the moat (speed, UX, price)?',
-        r2: 'Refine personas to be highly specific based on feedback. Add measurable KPIs (e.g., churn, NPS, scan completion). Finalize the pricing strategy (do not defer this). Define what MVP success looks like.',
-    },
-    architect: {
-        r1: 'Propose a concrete technical architecture. Describe the exact data flow (e.g., User → API Gateway → Auth → Queue → ZAP worker → DB → Report renderer). Specify scaling rules (how many instances?), expected scan times, and where the bottleneck is. Include an architecture diagram description.',
-        r2: 'Respond to feasibility concerns. Address failure handling: What if a worker crashes mid-scan? Is the report partial or retried? State explicit performance specs: latency, queue sizes, timeouts.',
-    },
-    ux: {
-        r1: 'Describe 2-3 key user flows. Define the Report Structure in detail: What metrics on the summary page? Severity tiers? Prioritization logic? Filtering/sorting capabilities? Describe the first-run onboarding experience (5-min tutorial, sample scan?).',
-        r2: 'Refine report layout. How are remediation recommendations presented? Add UI acceptance criteria (load times, mobile). Define error states if a scan fails.',
-    },
-    developer: {
-        r1: 'List the exact tech stack (languages, frameworks, libraries, databases). Define the project structure. What build tools, CI/CD pipeline, and deployment strategy? Estimate implementation complexity. Address scanning integration details and worker management.',
-        r2: 'Respond to architecture proposals. Identify technical debt risks. Propose specific testing strategy. What needs to be built vs open-source?',
-    },
-    pm: {
-        r1: 'Define a 3-phase roadmap. MVP (launch), Phase 2 (growth), Phase 3 (scale). List specific features per phase. Do not defer pricing; mandate a pricing decision for MVP. What are the GTM milestones?',
-        r2: 'Resolve disagreements. Finalize MVP scope. Ensure report structure, pricing, and architecture diagrams are strictly included in the consensus. Define launch criteria.',
-    },
-    qa: {
-        r1: 'Define specific test scenarios. What happens if a scan takes >5 minutes? (Async + email notifications vs real-time if <30s). Define false positive/negative thresholds. What monitoring and alerting is needed?',
-        r2: 'Challenge vague acceptance criteria. Define the QA strategy (manual vs automated, load testing). Identify the top 5 things most likely to break.',
-    },
-    techwriter: {
-        r1: 'Define documentation deliverables. Detail the onboarding strategy (welcome emails, help templates). What is the exact structure of a vulnerability recommendation (Severity + Business Risk + Fix Steps)?',
-        r2: 'Refine the report and onboarding docs based on feedback. Ensure all technical terms have user-facing explanations.',
-    },
-    security: {
-        r1: 'Define the threat model FOR THIS SERVICE: How do you prevent API abuse (scan bombing)? How do you handle stored XSS in report data? DMCA/scanning unowned sites (verification mechanisms)? Secure deletion of scan data? Auth model and data classification.',
-        r2: 'Provide concrete GDPR implementation details (e.g., "Consent banner on signup, auto-delete scans after 90 days per Art. 17, DPA with AWS"). State explicitly if PHI is handled; if NO, state "No PHI handling".',
-    },
-};
-
 function buildAgentPrompt(
     topic: string,
     agentId: string,
@@ -273,6 +364,7 @@ Round ${round} instructions:
 ${instruction}
 
 RULES:
+- Everything you say must be about THIS topic. Do not import examples, competitors, metrics, or scenarios from an unrelated product domain.
 - Be SPECIFIC: name tools, frameworks, numbers, thresholds — not generic advice.
 - Every claim needs a concrete example or metric.
 - Max 150 words. No filler.`;
@@ -301,123 +393,287 @@ Your task:
 Be decisive. Use specific numbers, tools, and technologies. Max 250 words.`;
 }
 
-function buildPRDPrompt(topic: string, history: DebateMessage[]): string {
-    const lastByAgent = new Map<string, string>();
-    for (const m of history) {
-        lastByAgent.set(m.agentId, m.content);
-    }
-    const condensed = Array.from(lastByAgent.entries())
-        .map(([id, content]) => `[${id.toUpperCase()}]: ${content}`)
+const AGENT_SPECIFICS: Record<string, { r1: string; r2: string }> = {
+    analyst: {
+        r1: "Define 3 distinct, specific user personas (Name, Role, Context, Pain point) grounded in this exact topic. Define a concrete pricing proposal with real numbers appropriate to this market (freemium vs seat-based vs usage-based, with the actual tier prices). State competitive positioning: perform a detailed competitive analysis against at least 5 real products that genuinely compete in THIS product's category — name them specifically, and do not name tools from an unrelated market. Clearly explain why users will switch to our platform and define our unique product moat. Detail GTM launch phases (Alpha, Beta, GA) and the monetization plan.",
+        r2: "Refine personas to be highly specific based on feedback. Add measurable KPIs (churn, NPS, activation rate, retention). Finalize the pricing strategy (do not defer this). Design free-tier limits around this product's actual cost drivers so the free tier cannot be abused or turned into a cost sink. Define what MVP success looks like in numbers.",
+    },
+    architect: {
+        r1: "Propose a concrete technical architecture. Describe the exact end-to-end data flow for this product's core operation. Specify scaling rules (how many instances, at what trigger?), expected latency or processing time for the real operations this product performs, and where the bottleneck is. Include an architecture diagram description. CRITICAL: Vite is strictly a frontend build tool/bundler; the API Gateway and backend/worker services MUST NOT be built using or described as running on Vite. Specify actual backend technologies (e.g., Kong, Supabase Edge Functions, or Node.js/Express). Design core API endpoints (method, path, request/response schema) and authentication flows (OAuth2/JWT, SSO/SAML).",
+        r2: "Respond to feasibility concerns. Address failure handling for this product's critical operations: what happens on a mid-operation crash — partial result, retry, or idempotent replay? State explicit performance specs: separate interactive UI/API response latency (target < 200ms p95) from any long-running background job duration, and specify async notification (WebSocket/SSE) wherever a job outlasts a request. Enforce TLS 1.3 minimum for all in-transit encryption.",
+    },
+    ux: {
+        r1: 'Describe 2-3 key user flows for this specific product. Define the primary result/output screen in detail: which metrics are shown, what the information hierarchy and prioritization logic is, and what filtering and sorting are available. Detail the UX wireframe layouts. Specify how the UI handles 5 key states: Default, Loading, Empty, Error, and Mobile/Responsive. Detail accessibility requirements (WCAG 2.1 AA compliance minimum) and localization/language plans.',
+        r2: "Refine the primary screen layouts. How are the product's recommendations or next actions presented to the user? Add UI acceptance criteria (load times, mobile breakpoints). Define the error states for this product's real failure modes.",
+    },
+    developer: {
+        r1: 'List the exact tech stack (languages, frameworks, libraries, databases). Define the project structure. What build tools, CI/CD pipeline, and deployment strategy? Estimate implementation complexity for each core feature. Explicitly differentiate Vite (frontend compiler) from the backend/gateway execution runtime. Create a Dependency Map detailing every third-party service and package this product actually needs, along with their open-source or commercial licenses and any risk flags.',
+        r2: 'Respond to architecture proposals. Identify technical debt risks. Propose a specific testing strategy. What needs to be built in-house vs adopted from open source?',
+    },
+    pm: {
+        r1: 'Define a 3-phase roadmap (MVP, Phase 2, Phase 3) formatted as a Markdown table. Each phase MUST include estimated timelines (e.g., Month 1-2), explicit team resourcing/headcount (e.g., 2 Backend FTEs, 1 Frontend FTE), explicit blockers or dependencies, and a concrete list of scope/features (do not leave feature lists empty!). Do not defer pricing; mandate a pricing decision for MVP. What are the GTM milestones? Define support channels, tiers, SLA response times, and uptime targets (e.g., 99.9% uptime). Design subscription billing lifecycles (Stripe integration).',
+        r2: 'Resolve disagreements. Finalize MVP scope and phase feature lists. Ensure the primary screen design, pricing, and architecture diagram are strictly included in the consensus. Define launch criteria. Maintain the Open Questions & Decisions Log (table with owners and due dates).',
+    },
+    qa: {
+        r1: "Define specific test scenarios for this product's core operations. Determine the correct interaction model from the real operation duration: if an operation exceeds a few seconds, require async handling plus notification rather than a blocking request. Define quantitative thresholds for this product's key quality metric (accuracy, delivery success, error rate — whichever applies here). Challenge vague acceptance criteria. Demand that criteria be testable, non-placeholder, and quantitative (operation duration SLA, API response latency target < 200ms p95, rate limiting thresholds). Prohibit placeholder criteria that merely restate a feature name. What monitoring and alerting is needed? Design the Test Plan & QA Strategy.",
+        r2: 'Challenge vague acceptance criteria. Define the QA strategy (manual vs automated, load testing). Identify the top 5 things most likely to break in this specific product.',
+    },
+    techwriter: {
+        r1: "Define documentation deliverables. Detail the onboarding strategy (welcome emails, help templates, in-product guidance). What is the exact structure of this product's primary result or recommendation item — which fields it carries, how it is ordered, and what action it prompts?",
+        r2: 'Refine the primary output format and onboarding docs based on feedback. Ensure all technical terms have user-facing explanations.',
+    },
+    security: {
+        r1: 'Define the threat model FOR THIS SERVICE: how do you prevent abuse of its most expensive or most sensitive operation (rate limiting, quotas, proof of work)? How do you handle injection and stored XSS in any user-supplied content this product stores and renders? If the product acts on resources a user claims to own, design an explicit ownership-verification workflow to address the abuse and legal risk of acting on resources the user does not control. Define secure deletion of user data, the auth model, and data classification (PII/PHI). Enforce TLS 1.3 minimum for all in-transit encryption. Conduct a STRIDE threat enumeration.',
+        r2: 'Provide concrete GDPR implementation details tied to the data this product actually stores (e.g., "Consent banner on signup, auto-delete records after 90 days per Art. 17, DPA with the cloud provider"). Address HIPAA scope: justify whether Protected Health Information (PHI) is processed; if it is not, explicitly state "No PHI handled; HIPAA not applicable" to avoid compliance bloat.',
+    },
+};
+
+// ─── Document generation (batched) ──────────────────────────────────────────
+// A 19-section PRD does not fit in a single completion for any mainstream
+// model, so sections are generated in small batches. Each batch is parsed and
+// validated independently, and any section a batch failed to produce is
+// retried on its own rather than taking the whole document down with it.
+
+const SECTION_BATCH_SIZE = 5;
+const BATCH_MAX_TOKENS = 4000;
+const SINGLE_SECTION_MAX_TOKENS = 1600;
+
+function buildSectionBatchPrompt(
+    topic: string,
+    projectType: string,
+    contextBlock: string,
+    specs: SectionSpec[],
+    startNumber: number,
+    totalSections: number,
+    docKind: 'PRD' | 'PLAN'
+): string {
+    const docName =
+        docKind === 'PRD'
+            ? 'Product Requirements Document (PRD)'
+            : 'Architectural Design and Agile Sprint Plan';
+    const roleName =
+        docKind === 'PRD' ? 'senior Product Architect' : 'Principal Software Architect and Agile Coach';
+
+    const endNumber = startNumber + specs.length - 1;
+    const sectionList = specs
+        .map((s, i) => `${startNumber + i}. "${s.title}" — ${s.brief}`)
         .join('\n');
 
-    return `Generate a professional Product Requirements Document as a JSON array. Topic: "${topic}"
+    const scopeLine =
+        specs.length === 1
+            ? `You are writing section ${startNumber} of ${totalSections} of this document.`
+            : `You are writing sections ${startNumber}-${endNumber} of ${totalSections} of this document.`;
 
-Agent consensus and inputs:
-${condensed}
+    return `You are a ${roleName}. You are producing part of a comprehensive, professional, production-ready ${docName} for the following project:
+Topic: "${topic}"
+Project Type: "${projectType}"
 
-Respond ONLY with a valid JSON array. No markdown fences, no commentary.
-Each element: {"title":"Section Title","content":"Full section content in markdown"}
+${ENFORCED_STACK}
+${contextBlock}
+${scopeLine}
+Write ONLY the sections listed below. Do not write any other section, do not repeat sections from other parts of the document, and do not summarise the document as a whole.
 
-REQUIRED SECTIONS (in this order):
+Respond ONLY with a valid JSON array. Do not include markdown code fences, do not include any commentary before or after.
+The array must contain exactly ${specs.length} element${specs.length === 1 ? '' : 's'}, in the order listed, each strictly matching this structure:
+{
+  "title": "Section Title",
+  "content": "Full section content in markdown format"
+}
+Use the section titles EXACTLY as written below, in UPPERCASE, with no numbering inside the title.
 
-1. "Overview" — 2-3 sentence product summary. What it does, who it's for, why it matters.
+SECTIONS TO WRITE:
+${sectionList}
 
-2. "Problem Statement" — The specific pain point. Include market context and why existing solutions fail. Be concrete.
+${QUALITY_RULES}`;
+}
 
-3. "User Personas & Stories" — Define 3 distinct, specific personas (Name, Role, Work Context, Specific Pain Point). Then 3-5 specific user stories.
 
-4. "Goals, Non-Goals & Business Strategy" — Goals: 3-5 measurable objectives. Non-Goals: explicitly out of scope. Pricing Strategy: Mandatory concrete proposal (e.g., Freemium/Tiers/Costs). Competitive Positioning: Why choose this over alternatives (Qualys/Rapid7/ZAP)? What is the moat?
+/**
+ * Generates every requested section, batch by batch, retrying individually for
+ * any section a batch failed to produce. Returns the sections in spec order
+ * plus the titles that could not be generated at all.
+ */
+async function generateSections(
+    specs: SectionSpec[],
+    topic: string,
+    projectType: string,
+    contextBlock: string,
+    docKind: 'PRD' | 'PLAN',
+    provider: string,
+    apiKey: string,
+    model: string | undefined,
+    onProgress: (done: number, total: number) => void
+): Promise<{ sections: PRDSection[]; missing: string[] }> {
+    const collected = new Map<string, PRDSection>();
 
-5. "Technical Architecture" — Include a detailed architecture diagram description (e.g., User → API Gateway → Worker → DB). Name specific technologies. Define scaling rules, expected scan times, bottleneck analysis, and failure handling (what happens if a worker crashes mid-scan).
+    for (let i = 0; i < specs.length; i += SECTION_BATCH_SIZE) {
+        const batch = specs.slice(i, i + SECTION_BATCH_SIZE);
+        const prompt = buildSectionBatchPrompt(
+            topic,
+            projectType,
+            contextBlock,
+            batch,
+            i + 1,
+            specs.length,
+            docKind
+        );
 
-6. "Core Engine & Capabilities" — What specific capabilities does the product have? What are the limitations? What tools/libraries power it? Performance specs: throughput, latency targets, timeout limits, concurrency.
+        try {
+            const raw = await callLLM(prompt, provider, apiKey, model, BATCH_MAX_TOKENS);
+            for (const section of extractSections(raw)) {
+                const key = titleKey(section.title);
+                if (batch.some((s) => titleKey(s.title) === key) && !collected.has(key)) {
+                    collected.set(key, section);
+                }
+            }
+        } catch (err) {
+            console.warn(`[generateSections] batch starting at section ${i + 1} failed:`, err);
+        }
 
-7. "Report Structure & Output" — Describe the core deliverable. What metrics appear on the summary page? Severity tiers (Critical/High/Medium/Low)? Prioritization logic? Filtering/sorting capabilities? Export formats? Describe the visual layout.
+        onProgress(Math.min(i + batch.length, specs.length), specs.length);
+    }
 
-8. "Data Handling & Privacy" — Data classification (PII, PHI, public). Encryption: at-rest and in-transit. Data retention policy. For GDPR: concrete implementations (e.g., "Consent banner on signup, auto-delete after 90 days per Art. 17"). For HIPAA: BAA, audit logging, or explicitly state "No PHI handled".
+    // Per-section retry for anything the batches missed. A lone section has
+    // plenty of token headroom, so this almost always closes the gap.
+    const missingSpecs = specs.filter((s) => !collected.has(titleKey(s.title)));
+    for (const spec of missingSpecs) {
+        const index = specs.findIndex((s) => s.title === spec.title) + 1;
+        const prompt = buildSectionBatchPrompt(
+            topic,
+            projectType,
+            contextBlock,
+            [spec],
+            index,
+            specs.length,
+            docKind
+        );
+        try {
+            const raw = await callLLM(prompt, provider, apiKey, model, SINGLE_SECTION_MAX_TOKENS);
+            const recovered = extractSections(raw).find(
+                (s) => titleKey(s.title) === titleKey(spec.title)
+            );
+            if (recovered) {
+                collected.set(titleKey(spec.title), recovered);
+            }
+        } catch (err) {
+            console.warn(`[generateSections] retry for "${spec.title}" failed:`, err);
+        }
+    }
 
-9. "Security & Threat Model" — Threat model FOR THIS SERVICE: API abuse prevention (scan bombing), handling stored XSS in report data, scanning unowned sites (DMCA verification), secure data deletion. Auth model and secret management.
+    const sections: PRDSection[] = [];
+    const missing: string[] = [];
+    for (const spec of specs) {
+        const found = collected.get(titleKey(spec.title));
+        // Normalize the title back to the canonical spelling so downstream
+        // consumers can rely on it.
+        if (found) {
+            sections.push({ ...found, title: spec.title });
+        } else {
+            missing.push(spec.title);
+        }
+    }
 
-10. "Success Metrics & Acceptance Criteria" — 5-7 measurable KPIs with targets (e.g., NPS >40, User retention M1 >40%). Acceptance criteria must be testable. Include onboarding strategy (e.g., first-run 5-min tutorial).
-
-11. "Roadmap" — 3 phases: MVP, Phase 2, Phase 3. Each phase lists specific features. Include launch criteria for MVP.
-
-12. "Risks & Mitigations" — 5-7 concrete risks with severity (High/Medium/Low), likelihood, impact, and specific mitigation strategy. Include technical risks, business risks, and compliance risks. No vague mitigations like "develop a plan" — state the actual plan.
-
-QUALITY RULES:
-- NO generic or vague statements. Every point must be specific and actionable.
-- Use real tool/framework names, not "appropriate technology".
-- Include numbers: percentages, time limits, user counts, cost estimates.
-- User stories must be testable — an engineer should be able to write a test from each one.
-- Compliance must include implementation details, not just "be compliant".
-- Risks must have concrete mitigations, not "address later".`;
+    return { sections, missing };
 }
 
 // ─── Security & Compliance pass (mirrors SecurityComplianceService) ──────────
+// Keywords are matched on word boundaries and deliberately kept specific:
+// broad tokens such as "name" or "personal" appear in nearly every PRD section
+// (e.g. "field names") and previously flagged the entire document.
 
 const GDPR_KEYWORDS = [
-    'email', 'name', 'address', 'phone', 'user data', 'personal', 'profile',
-    'ip address', 'location', 'geolocation', 'analytics', 'tracking', 'cookie',
-    'biometric', 'financial', 'credit', 'bank', 'identity', 'consent',
+    'email address', 'phone number', 'ip address', 'home address', 'mailing address',
+    'geolocation', 'location data', 'biometric', 'credit card', 'bank account',
+    'personal data', 'pii', 'behavioral tracking', 'user profile', 'cookie',
 ];
 
 const HIPAA_KEYWORDS = [
-    'health', 'medical', 'diagnosis', 'patient', 'prescription', 'clinical',
-    'symptom', 'doctor', 'hospital', 'lab result', 'ehr', 'phi', 'treatment',
-    'protected health', 'medication', 'dosage', 'allergy', 'immunization',
-    'mental health', 'substance abuse', 'genomic',
+    'protected health', 'phi', 'medical record', 'patient', 'diagnosis',
+    'prescription', 'clinical', 'lab result', 'ehr', 'treatment plan',
+    'medication', 'immunization', 'mental health', 'substance abuse', 'genomic',
 ];
+
+
+// Sections whose entire purpose is compliance — flagging them just restates
+// what the section already covers in depth.
+const COMPLIANCE_EXEMPT_SECTIONS = new Set(
+    ['DATA HANDLING & PRIVACY', 'SECURITY & THREAT MODEL'].map(titleKey)
+);
 
 // Context-specific compliance guidance instead of repeating the same boilerplate
 const GDPR_ACTIONS: Record<string, string> = {
-    'email': 'Implement double opt-in for email collection. Add unsubscribe endpoint. Store consent timestamp.',
-    'name': 'Minimize data collection — collect only if essential. Add data export (Art. 20) and deletion (Art. 17) endpoints.',
-    'address': 'Add explicit consent mechanism with purpose limitation. Implement data retention policy (Art. 5) with auto-purge.',
-    'phone': 'Collect only with explicit consent. Provide opt-out mechanism. Do not use for secondary purposes without re-consent.',
-    'user data': 'Implement privacy-by-design (Art. 25). Data Protection Impact Assessment (DPIA) required if processing at scale.',
-    'personal': 'Map all personal data flows. Implement access controls. Designate a Data Protection Officer if required.',
-    'profile': 'Allow users to view, export, and delete their profile data. Implement right to data portability (Art. 20).',
-    'ip address': 'IP addresses are PII under GDPR. Anonymize in logs (truncate last octet). Define retention period.',
-    'location': 'Location data requires explicit consent. Implement granularity controls. Allow users to disable tracking.',
-    'analytics': 'Use privacy-respecting analytics (e.g., Plausible, Fathom) or implement cookie consent banner with opt-out.',
-    'tracking': 'Implement cookie consent banner (ePrivacy Directive). Allow granular consent (necessary vs. analytics vs. marketing).',
+    'email address': 'Implement double opt-in for email collection. Add an unsubscribe endpoint. Store the consent timestamp.',
+    'phone number': 'Collect only with explicit consent. Provide an opt-out mechanism. Do not use for secondary purposes without re-consent.',
+    'ip address': 'IP addresses are PII under GDPR. Anonymize in logs (truncate the last octet). Define a retention period.',
+    'home address': 'Add an explicit consent mechanism with purpose limitation. Implement a retention policy (Art. 5) with auto-purge.',
+    'mailing address': 'Add an explicit consent mechanism with purpose limitation. Implement a retention policy (Art. 5) with auto-purge.',
+    'geolocation': 'Location data requires explicit consent. Implement granularity controls. Allow users to disable tracking.',
+    'location data': 'Location data requires explicit consent. Implement granularity controls. Allow users to disable tracking.',
+    'biometric': 'Biometric data is a special category under Art. 9. Requires explicit consent and a DPIA before processing.',
+    'credit card': 'Do not store raw card data — delegate to a PCI-DSS compliant processor and retain only tokens.',
+    'bank account': 'Treat as financial PII: encrypt at rest, restrict access by role, and log every access.',
+    'personal data': 'Implement privacy-by-design (Art. 25). A Data Protection Impact Assessment (DPIA) is required if processing at scale.',
+    'pii': 'Map all personal data flows. Implement access controls. Designate a Data Protection Officer if required.',
+    'behavioral tracking': 'Implement a cookie consent banner (ePrivacy Directive) with granular consent (necessary vs. analytics vs. marketing).',
+    'user profile': 'Allow users to view, export, and delete their profile data. Implement the right to data portability (Art. 20).',
     'cookie': 'Cookie banner required. Categorize cookies (essential/functional/analytics/marketing). Respect "Do Not Track".',
-    'consent': 'Consent must be freely given, specific, informed, unambiguous (Art. 7). Record consent with timestamp and version.',
 };
 
 const HIPAA_ACTIONS: Record<string, string> = {
-    'health': 'If handling PHI: encrypt AES-256 at rest, TLS 1.3 in transit. BAA with all subprocessors. Audit logging required.',
-    'patient': 'Implement role-based access controls. Minimum necessary standard applies. Audit all PHI access.',
-    'medical': 'Assess if data qualifies as PHI. If yes: BAA, encryption, access controls, 6-year retention minimum.',
+    'protected health': 'PHI — requires full HIPAA safeguards: AES-256 at rest, TLS 1.3 in transit, BAA with all subprocessors, audit logging.',
+    'phi': 'PHI — requires full HIPAA safeguards: AES-256 at rest, TLS 1.3 in transit, BAA with all subprocessors, audit logging.',
+    'patient': 'Implement role-based access controls. The minimum necessary standard applies. Audit all PHI access.',
+    'medical record': 'Assess whether this data qualifies as PHI. If yes: BAA, encryption, access controls, 6-year retention minimum.',
     'diagnosis': 'PHI — requires full HIPAA safeguards. Implement de-identification (Safe Harbor or Expert Determination).',
 };
 
+function matchesKeyword(text: string, keyword: string): boolean {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}s?\\b`, 'i').test(text);
+}
+
 function applySecurityPass(sections: PRDSection[]): PRDSection[] {
     return sections.map((section) => {
-        const lower = (section.content || '').toLowerCase();
+        if (COMPLIANCE_EXEMPT_SECTIONS.has(titleKey(section.title))) {
+            return section;
+        }
+
+        const content = section.content || '';
+        const lower = content.toLowerCase();
         const flags: string[] = [];
-        let gdprFlagged = false;
-        let hipaaFlagged = false;
 
         // Check for negations to prevent false positive flags
-        const explicitlyNoPHI = lower.match(/\b(no|zero|without|not\shandling)\s+(phi|protected\shealth|health\sdata)\b/i) || lower.includes('phi: none') || lower.includes('phi is not');
-        const explicitlyNoGDPR = lower.match(/\b(no|zero|without|not\shandling)\s+(pii|personal\sdata)\b/i) || lower.includes('pii: none');
+        const explicitlyNoPHI =
+            /\b(no|zero|without|not\s+handling)\s+(phi|protected\s+health|health\s+data)\b/i.test(lower) ||
+            lower.includes('phi: none') ||
+            lower.includes('phi is not') ||
+            lower.includes('hipaa not applicable');
+        const explicitlyNoGDPR =
+            /\b(no|zero|without|not\s+handling)\s+(pii|personal\s+data)\b/i.test(lower) ||
+            lower.includes('pii: none');
 
-        for (const kw of GDPR_KEYWORDS) {
-            if (!explicitlyNoGDPR && lower.includes(kw) && !gdprFlagged) {
-                const action = GDPR_ACTIONS[kw] || `Implement consent banners on signup. Auto-delete data after 90 days (per Art. 17). DPA with cloud providers required.`;
-                flags.push(`⚠️ GDPR: "${kw}" detected in "${section.title}" — ${action}`);
-                gdprFlagged = true;
+        if (!explicitlyNoGDPR) {
+            const hit = GDPR_KEYWORDS.find((kw) => matchesKeyword(content, kw));
+            if (hit) {
+                const action =
+                    GDPR_ACTIONS[hit] ??
+                    'Implement consent capture on signup. Define a retention period with auto-deletion (Art. 17). A DPA with cloud providers is required.';
+                flags.push(`⚠️ GDPR: "${hit}" detected in "${section.title}" — ${action}`);
             }
         }
-        for (const kw of HIPAA_KEYWORDS) {
-            if (!explicitlyNoPHI && lower.includes(kw) && !hipaaFlagged) {
-                const action = HIPAA_ACTIONS[kw] || `Encrypt PHI at rest (AES-256) and in transit (TLS 1.3); enable audit logging; BAA required`;
-                flags.push(`⚠️ HIPAA: "${kw}" detected in "${section.title}" — ${action}`);
-                hipaaFlagged = true;
+        if (!explicitlyNoPHI) {
+            const hit = HIPAA_KEYWORDS.find((kw) => matchesKeyword(content, kw));
+            if (hit) {
+                const action =
+                    HIPAA_ACTIONS[hit] ??
+                    'Encrypt PHI at rest (AES-256) and in transit (TLS 1.3); enable audit logging; a BAA is required.';
+                flags.push(`⚠️ HIPAA: "${hit}" detected in "${section.title}" — ${action}`);
             }
         }
 
+        if (flags.length === 0) {
+            return section;
+        }
         return { ...section, complianceFlags: [...(section.complianceFlags ?? []), ...flags] };
     });
 }
@@ -446,18 +702,17 @@ function formatPRDMarkdown(title: string, sections: PRDSection[]): string {
 
 // ─── Generate clean PRD title ───────────────────────────────────────────────
 
+const TITLE_FILLER = /\b(it|i want|create|build|make|develop|design|write|generate|a|an|the|for|to|from|with|and|or|that|which|this|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|shall|should|may|might|must|can|could)\b/gi;
+
 function generateCleanTitle(rawTopic: string, sections: PRDSection[]): string {
-    // Try to extract a title from the Overview section if it has a clear product name
-    const overviewSection = sections.find(s => s.title === 'Overview');
-    
     // Clean up the raw topic first
     let cleaned = rawTopic
         .replace(/[-–—>→]+/g, ' ')           // Remove arrows and dashes
         .replace(/\.\.\./g, ' ')               // Remove ellipsis
-        .replace(/\b(it|i want|create|build|make|develop|design|write|generate|a|an|the|for|to|from|with|and|or|that|which|this|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|shall|should|may|might|must|can|could)\b/gi, ' ')  // Strip filler words
+        .replace(TITLE_FILLER, ' ')            // Strip filler words
         .replace(/\s+/g, ' ')                  // Collapse whitespace
         .trim();
-    
+
     // If it's too long, take the first meaningful phrase
     if (cleaned.length > 60) {
         // Take up to the first comma, period, or 60 chars
@@ -469,29 +724,31 @@ function generateCleanTitle(rawTopic: string, sections: PRDSection[]): string {
             cleaned = cleaned.substring(0, 60).replace(/\s+\S*$/, '').trim();
         }
     }
-    
-    // Title-case it
+
+    // Title-case it, preserving acronyms that were already fully capitalised
     cleaned = cleaned
         .split(' ')
-        .filter(w => w.length > 0)
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .filter((w) => w.length > 0)
+        .map((w) =>
+            w.length > 1 && w === w.toUpperCase()
+                ? w
+                : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+        )
         .join(' ');
-    
-    // If we ended up with something too short or empty, use the overview
+
+    // If we ended up with something too short or empty, fall back to the
+    // opening section of the generated document.
     if (cleaned.length < 5) {
-        if (overviewSection && overviewSection.content) {
-            // Extract first sentence from overview
-            const firstSentence = overviewSection.content.split(/[.!?]/)[0].trim();
+        const lead = sections[0];
+        if (lead?.content) {
+            const firstSentence = lead.content.replace(/^#+\s*/, '').split(/[.!?\n]/)[0].trim();
             if (firstSentence.length > 5 && firstSentence.length < 80) {
-                cleaned = firstSentence;
-            } else {
-                cleaned = 'Product Requirements Document';
+                return firstSentence;
             }
-        } else {
-            cleaned = 'Product Requirements Document';
         }
+        return 'Product Requirements Document';
     }
-    
+
     return cleaned;
 }
 
@@ -510,12 +767,14 @@ export async function POST(request: NextRequest) {
     } catch (e) {
         // Body is empty or malformed
     }
-    const { topic, provider, apiKey, projectType, model } = body as {
+    const { topic, provider, apiKey, projectType, model, fastTrack, mode } = body as {
         topic: string;
         provider: string;
         apiKey: string;
         projectType?: string;
         model?: string;
+        fastTrack?: boolean;
+        mode?: string;
     };
 
     if (!topic || !provider || !apiKey) {
@@ -525,6 +784,11 @@ export async function POST(request: NextRequest) {
         });
     }
 
+    const resolvedProjectType = projectType || 'Full Stack App';
+    const isPlanMode = mode === 'Plan';
+    const specs = isPlanMode ? PLAN_SECTIONS : PRD_SECTIONS;
+    const docKind: 'PRD' | 'PLAN' = isPlanMode ? 'PLAN' : 'PRD';
+
     // Create a readable stream for SSE
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
@@ -533,11 +797,81 @@ export async function POST(request: NextRequest) {
                 controller.enqueue(encoder.encode(sseEncode(event, data)));
             };
 
+            const emitProgress = (done: number, total: number) => {
+                send('prd-progress', { done, total });
+            };
+
+            const finish = (
+                sections: PRDSection[],
+                missing: string[],
+                history: DebateMessage[],
+                roundCount: number
+            ) => {
+                send('phase', { phase: 'security-pass', message: 'Running security & compliance checks...' });
+                const withFlags = applySecurityPass(sections);
+
+                const baseTitle = generateCleanTitle(topic, withFlags);
+                const docTitle = isPlanMode ? `${baseTitle} (Architecture & Sprint Plan)` : baseTitle;
+                const markdown = formatPRDMarkdown(docTitle, withFlags);
+
+                if (missing.length > 0) {
+                    send('warning', {
+                        message: `${missing.length} section${missing.length === 1 ? '' : 's'} could not be generated: ${missing.join(', ')}.`,
+                        missing,
+                    });
+                }
+
+                send('phase', {
+                    phase: 'complete',
+                    message: isPlanMode ? 'Architecture & Sprint Plan complete!' : 'PRD generation complete!',
+                });
+                send('prd-complete', {
+                    title: docTitle,
+                    markdown,
+                    sections: withFlags,
+                    debateHistory: history,
+                    agentCount: history.length > 0 ? DEBATE_AGENTS.length : 1,
+                    roundCount,
+                    missingSections: missing,
+                });
+                send('done', { success: true });
+            };
+
             try {
+                if (fastTrack) {
+                    send('phase', {
+                        phase: 'prd-gen',
+                        message: isPlanMode
+                            ? 'Fast Track: Generating Architectural & Sprint Plan...'
+                            : 'Fast Track: Generating PRD...',
+                    });
+
+                    const { sections, missing } = await generateSections(
+                        specs,
+                        topic,
+                        resolvedProjectType,
+                        '',
+                        docKind,
+                        provider,
+                        apiKey,
+                        model,
+                        emitProgress
+                    );
+
+                    if (sections.length === 0) {
+                        throw new Error(
+                            'The model did not return any usable sections. Try a different model in Settings.'
+                        );
+                    }
+
+                    finish(sections, missing, [], 1);
+                    return;
+                }
+
                 const history: DebateMessage[] = [];
                 const numRounds = 2;
 
-                // ── Phase A: 3-round multi-agent debate ───────────────────
+                // ── Phase A: multi-agent debate ───────────────────────────
                 send('phase', { phase: 'debate', message: 'Starting optimized 8-agent debate (2 rounds)...' });
 
                 for (let round = 1; round <= numRounds; round++) {
@@ -600,48 +934,52 @@ export async function POST(request: NextRequest) {
                 // ── Phase C: PRD generation ───────────────────────────────
                 send('phase', { phase: 'prd-gen', message: 'Generating PRD document...' });
 
-                const prdPrompt = buildPRDPrompt(topic, history);
-                let prdJson = await callLLM(prdPrompt, provider, apiKey, model, 3500);
+                const lastByAgent = new Map<string, string>();
+                for (const m of history) {
+                    lastByAgent.set(m.agentId, m.content);
+                }
+                const condensed = Array.from(lastByAgent.entries())
+                    .map(([id, content]) => `[${id.toUpperCase()}]: ${content}`)
+                    .join('\n');
 
-                // Robust JSON extraction
-                const jsonMatch = prdJson.match(/\[\s*\{[\s\S]*\}\s*\]/);
-                if (jsonMatch) {
-                    prdJson = jsonMatch[0];
-                } else {
-                    prdJson = prdJson.replace(/```json/gi, '').replace(/```/g, '').trim();
+                const contextBlock = `
+AGENT CONSENSUS AND INPUTS:
+${condensed}
+
+CRITICAL CONSENSUS RULE:
+The sections you write MUST be directly synthesized from the agent consensus above. Do NOT use generic placeholder templates. Every technical stack decision, pricing tier, feature list, and threat mitigation MUST match what the agents debated and agreed upon. Do not invent details that contradict the debate.
+`;
+
+                const { sections, missing } = await generateSections(
+                    specs,
+                    topic,
+                    resolvedProjectType,
+                    contextBlock,
+                    docKind,
+                    provider,
+                    apiKey,
+                    model,
+                    emitProgress
+                );
+
+                if (sections.length === 0) {
+                    // Never silently collapse the document — surface the failure
+                    // and hand back the consensus so the debate is not lost.
+                    send('warning', {
+                        message:
+                            'Section generation failed; falling back to the raw consensus synthesis. Try a different model in Settings.',
+                        missing,
+                    });
+                    finish(
+                        [{ title: 'OVERVIEW AND SYNTHESIS', content: convergenceResponse }],
+                        missing,
+                        history,
+                        numRounds
+                    );
+                    return;
                 }
 
-                let sections: PRDSection[] = [];
-                try {
-                    sections = JSON.parse(prdJson);
-                } catch {
-                    // Fallback to convergence text
-                    sections = [{
-                        title: 'Overview and Synthesis',
-                        content: convergenceResponse,
-                        complianceFlags: [],
-                    }];
-                }
-
-                // ── Phase D: Security & Compliance pass ───────────────────
-                send('phase', { phase: 'security-pass', message: 'Running security & compliance checks...' });
-                sections = applySecurityPass(sections);
-
-                // ── Generate clean title ──────────────────────────────────
-                const prdTitle = generateCleanTitle(topic, sections);
-                const prdMarkdown = formatPRDMarkdown(prdTitle, sections);
-
-                send('phase', { phase: 'complete', message: 'PRD generation complete!' });
-                send('prd-complete', {
-                    title: prdTitle,
-                    markdown: prdMarkdown,
-                    sections,
-                    debateHistory: history,
-                    agentCount: DEBATE_AGENTS.length,
-                    roundCount: numRounds,
-                });
-
-                send('done', { success: true });
+                finish(sections, missing, history, numRounds);
             } catch (err: any) {
                 send('error', { message: err.message || 'Unknown error during debate' });
             } finally {

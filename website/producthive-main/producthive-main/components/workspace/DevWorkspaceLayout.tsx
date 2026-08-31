@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Hexagon, Share2, Github, Globe, Rocket, ChevronDown } from 'lucide-react';
+import { Hexagon, Share2, Github, Globe, Rocket, ChevronDown, RefreshCw, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import DevChat from './DevChat';
 import CodePanel, { type GeneratedFile } from './CodePanel';
+import { loadSettings } from '@/components/landing/SettingsPanel';
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,24 @@ interface DevWorkspaceLayoutProps {
     projectType: string;
     mode: string;
     visibility?: string;
+}
+
+function detectProvider(): { provider: string; apiKey: string; model?: string } | null {
+    const s = loadSettings();
+    if (!s.preferredModel) return null;
+    if (s.preferredModel === 'test') return { provider: 'test', apiKey: 'test', model: 'llama-3.3-70b-versatile' };
+    if (s.preferredModel === 'Groq' && s.groqKey) return { provider: 'Groq', apiKey: s.groqKey, model: s.groqModel || 'llama-3.3-70b-versatile' };
+    if (s.preferredModel === 'OpenAI' && s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
+    if (s.preferredModel === 'Qwen' && s.qwenKey) return { provider: 'Qwen', apiKey: s.qwenKey };
+    if (s.preferredModel === 'Mistral AI' && s.mistralKey) return { provider: 'Mistral AI', apiKey: s.mistralKey };
+    if (s.preferredModel === 'Google' && s.googleKey) return { provider: 'Google', apiKey: s.googleKey };
+    if (s.preferredModel === 'Moonshot AI' && s.moonshotKey) return { provider: 'Moonshot AI', apiKey: s.moonshotKey };
+    if (s.preferredModel === 'MiniMax' && s.minimaxKey) return { provider: 'MiniMax', apiKey: s.minimaxKey };
+    if (s.preferredModel === 'DeepSeek' && s.deepseekKey) return { provider: 'DeepSeek', apiKey: s.deepseekKey };
+    if (s.groqKey) return { provider: 'Meta', apiKey: s.groqKey };
+    if (s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
+    if (s.anthropicKey) return { provider: 'Anthropic', apiKey: s.anthropicKey };
+    return null;
 }
 
 // ── Main Layout ──────────────────────────────────────────────────────────────
@@ -30,8 +49,120 @@ export default function DevWorkspaceLayout({
     const [projectName, setProjectName] = useState('my-project');
     const [showShareMenu, setShowShareMenu] = useState(false);
 
+    // Snapshot manager & self healing
+    const [snapshots, setSnapshots] = useState<GeneratedFile[][]>([]);
+    const [autoHealRetries, setAutoHealRetries] = useState(0);
+    const [isHealing, setIsHealing] = useState(false);
+    const [healError, setHealError] = useState<string | null>(null);
+
+    const saveSnapshot = useCallback(() => {
+        setSnapshots(prev => [...prev.slice(-4), JSON.parse(JSON.stringify(generatedFiles))]);
+    }, [generatedFiles]);
+
+    const rollback = useCallback(() => {
+        if (snapshots.length > 0) {
+            const last = snapshots[snapshots.length - 1];
+            setSnapshots(prev => prev.slice(0, -1));
+            setGeneratedFiles(last);
+            localStorage.setItem(`producthive-files-${query}`, JSON.stringify(last));
+            return true;
+        }
+        return false;
+    }, [snapshots, query]);
+
+    const handleSandpackError = useCallback(async (errorStr: string) => {
+        if (isHealing || isGenerating || autoHealRetries >= 3) {
+            if (autoHealRetries >= 3 && !isHealing && !healError) {
+                const success = rollback();
+                if (success) {
+                    setHealError("Self-healing failed after 3 attempts. Reverted to the last stable snapshot.");
+                } else {
+                    setHealError("Self-healing failed after 3 attempts. No snapshot to revert to.");
+                }
+                setAutoHealRetries(0);
+            }
+            return;
+        }
+
+        setIsHealing(true);
+        setHealError(null);
+
+        const creds = detectProvider();
+        if (!creds) {
+            setIsHealing(false);
+            setHealError("No API key configured for self-healing.");
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/heal', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    error: errorStr,
+                    files: generatedFiles,
+                    provider: creds.provider,
+                    apiKey: creds.apiKey,
+                    model: creds.model
+                })
+            });
+
+            if (!res.ok) {
+                throw new Error("Healing API call failed");
+            }
+
+            const data = await res.json();
+            if (data.success && data.files) {
+                setGeneratedFiles(data.files);
+                setAutoHealRetries(prev => prev + 1);
+            } else {
+                throw new Error(data.error || "Failed to fix error");
+            }
+        } catch (err: any) {
+            console.error("Healing failed:", err);
+            if (autoHealRetries + 1 >= 3) {
+                rollback();
+                setHealError("Self-healing failed. Reverted to last stable snapshot.");
+                setAutoHealRetries(0);
+            } else {
+                setAutoHealRetries(prev => prev + 1);
+            }
+        } finally {
+            setIsHealing(false);
+        }
+    }, [isHealing, isGenerating, autoHealRetries, generatedFiles, rollback, healError]);
+
+    // State persistence
+    useEffect(() => {
+        const savedFiles = localStorage.getItem(`producthive-files-${query}`);
+        const savedProjectName = localStorage.getItem(`producthive-project-name-${query}`);
+        if (savedFiles) {
+            try {
+                const parsed = JSON.parse(savedFiles);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    setGeneratedFiles(parsed);
+                }
+            } catch (e) {}
+        }
+        if (savedProjectName) {
+            setProjectName(savedProjectName);
+        }
+    }, [query]);
+
+    useEffect(() => {
+        if (generatedFiles.length > 0) {
+            localStorage.setItem(`producthive-files-${query}`, JSON.stringify(generatedFiles));
+        }
+    }, [generatedFiles, query]);
+
+    useEffect(() => {
+        localStorage.setItem(`producthive-project-name-${query}`, projectName);
+    }, [projectName, query]);
+
     const handleFilesGenerated = useCallback((files: GeneratedFile[]) => {
         setGeneratedFiles(files);
+        setAutoHealRetries(0);
+        setHealError(null);
     }, []);
 
     const handleFileStreaming = useCallback((path: string | null) => {
@@ -69,12 +200,22 @@ export default function DevWorkspaceLayout({
                     </span>
                 </div>
 
-                {/* Center: Build indicator */}
+                {/* Center: Build / Healing indicator */}
                 <div className="flex items-center gap-2">
                     {isGenerating ? (
                         <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#DD830A]/10 border border-[#DD830A]/20">
                             <div className="w-1.5 h-1.5 rounded-full bg-[#DD830A] animate-pulse" />
                             <span className="text-[11px] text-[#DD830A] font-medium">Building...</span>
+                        </div>
+                    ) : isHealing ? (
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 animate-pulse">
+                            <RefreshCw className="w-3.5 h-3.5 text-blue-400 animate-spin" />
+                            <span className="text-[11px] text-blue-400 font-medium">Self-Healing (Attempt {autoHealRetries + 1}/3)...</span>
+                        </div>
+                    ) : healError ? (
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20">
+                            <AlertCircle className="w-3.5 h-3.5 text-red-400" />
+                            <span className="text-[11px] text-red-400 font-medium">{healError}</span>
                         </div>
                     ) : generatedFiles.length > 0 ? (
                         <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/10 border border-green-500/20">
@@ -147,6 +288,7 @@ export default function DevWorkspaceLayout({
                         onFileStreaming={handleFileStreaming}
                         onGeneratingChange={handleGeneratingChange}
                         onProjectNameChange={handleProjectNameChange}
+                        saveSnapshot={saveSnapshot}
                     />
                 </motion.div>
 
@@ -162,6 +304,7 @@ export default function DevWorkspaceLayout({
                         isGenerating={isGenerating}
                         streamingFile={streamingFile}
                         projectName={projectName}
+                        onSandpackError={handleSandpackError}
                     />
                 </motion.div>
             </div>
