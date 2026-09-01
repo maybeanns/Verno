@@ -21,6 +21,7 @@ export const metadata: Metadata = {
 };
 
 import Navbar from "@/components/landing/Navbar";
+import { AuthProvider } from "@/components/auth/AuthProvider";
 
 export default function RootLayout({
     children,
@@ -30,8 +31,10 @@ export default function RootLayout({
     return (
         <html lang="en" suppressHydrationWarning>
             <body className={`${outfit.variable} ${dmSans.variable} font-sans antialiased`} suppressHydrationWarning>
-                <Navbar />
-                {children}
+                <AuthProvider>
+                    <Navbar />
+                    {children}
+                </AuthProvider>
             </body>
         </html>
     );

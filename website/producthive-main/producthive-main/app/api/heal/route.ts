@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { DEFAULT_GROQ_MODEL, GROQ_MODEL_IDS } from '@/lib/models';
+import { guardSharedKeyUsage } from '@/lib/api-guard';
 
 interface GeneratedFile {
     path: string;
@@ -42,13 +44,13 @@ async function callLLM(
         case 'test':
             url = 'https://api.groq.com/openai/v1/chat/completions';
             apiKey = process.env.GROQ_API_KEY || apiKey;
-            model = modelId !== 'test' && modelId ? modelId : 'llama-3.3-70b-versatile';
+            model = modelId !== 'test' && modelId ? modelId : DEFAULT_GROQ_MODEL;
             break;
         case 'Groq':
         case 'groq':
         case 'Meta':
             url = 'https://api.groq.com/openai/v1/chat/completions';
-            model = modelId || 'llama-3.3-70b-versatile';
+            model = modelId || DEFAULT_GROQ_MODEL;
             break;
         case 'OpenAI':
         case 'openai':
@@ -103,7 +105,7 @@ async function callLLM(
     let res = await makeRequest(model);
 
     if (!res.ok && res.status === 429 && (provider.toLowerCase() === 'groq' || provider === 'test')) {
-        const fallbacks = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct'];
+        const fallbacks = GROQ_MODEL_IDS.filter((m) => m !== model);
         for (const fb of fallbacks) {
             if (fb === model) continue;
             res = await makeRequest(fb);
@@ -229,6 +231,12 @@ export async function POST(request: NextRequest) {
 
         if (!error || !files || !provider || !apiKey) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+        }
+
+        // Develop mode is never funded by the shared key.
+        const guard = await guardSharedKeyUsage(request, { provider, mode: 'Develop' });
+        if (!guard.ok) {
+            return guard.response!;
         }
 
         const projectStructure = files.map(f => `  ${f.path}`).join('\n');

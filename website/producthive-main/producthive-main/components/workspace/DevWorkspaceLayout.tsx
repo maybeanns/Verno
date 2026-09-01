@@ -6,7 +6,10 @@ import { Hexagon, Share2, Github, Globe, Rocket, ChevronDown, RefreshCw, AlertCi
 import Link from 'next/link';
 import DevChat from './DevChat';
 import CodePanel, { type GeneratedFile } from './CodePanel';
-import { loadSettings } from '@/components/landing/SettingsPanel';
+import { loadSettings } from '@/lib/settings';
+import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { authHeaders } from '@/lib/auth-headers';
 
 // ── Props ────────────────────────────────────────────────────────────────────
 
@@ -20,8 +23,8 @@ interface DevWorkspaceLayoutProps {
 function detectProvider(): { provider: string; apiKey: string; model?: string } | null {
     const s = loadSettings();
     if (!s.preferredModel) return null;
-    if (s.preferredModel === 'test') return { provider: 'test', apiKey: 'test', model: 'llama-3.3-70b-versatile' };
-    if (s.preferredModel === 'Groq' && s.groqKey) return { provider: 'Groq', apiKey: s.groqKey, model: s.groqModel || 'llama-3.3-70b-versatile' };
+    if (s.preferredModel === 'test') return { provider: 'test', apiKey: 'test', model: DEFAULT_GROQ_MODEL };
+    if (s.preferredModel === 'Groq' && s.groqKey) return { provider: 'Groq', apiKey: s.groqKey, model: s.groqModel || DEFAULT_GROQ_MODEL };
     if (s.preferredModel === 'OpenAI' && s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
     if (s.preferredModel === 'Qwen' && s.qwenKey) return { provider: 'Qwen', apiKey: s.qwenKey };
     if (s.preferredModel === 'Mistral AI' && s.mistralKey) return { provider: 'Mistral AI', apiKey: s.mistralKey };
@@ -43,6 +46,7 @@ export default function DevWorkspaceLayout({
     mode,
     visibility,
 }: DevWorkspaceLayoutProps) {
+    const { accessToken } = useAuth();
     const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
     const [isGenerating, setIsGenerating] = useState(false);
     const [streamingFile, setStreamingFile] = useState<string | null>(null);
@@ -97,7 +101,7 @@ export default function DevWorkspaceLayout({
         try {
             const res = await fetch('/api/heal', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(accessToken),
                 body: JSON.stringify({
                     error: errorStr,
                     files: generatedFiles,

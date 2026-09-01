@@ -9,7 +9,13 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { ProjectType } from '@/lib/types/agent-types';
-import { loadSettings, type SettingsData } from './SettingsPanel';
+import { loadSettings, type SettingsData } from '@/lib/settings';
+import { DEFAULT_GROQ_MODEL, GROQ_MODEL_GROUPS } from '@/lib/models';
+import { extractAttachments, saveAttachments } from '@/lib/attachments';
+import { checkAccess, modeRequiresOwnKey, OPERATIONAL_MODES, FREE_TIER_LABEL, type OperationalMode } from '@/lib/entitlements';
+import { useAuth } from '@/components/auth/AuthProvider';
+import AuthModal from '@/components/auth/AuthModal';
+import SettingsForm from '@/components/settings/SettingsForm';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -17,8 +23,8 @@ const PROJECT_TYPES: ProjectType[] = [
     'Full Stack App', 'Mobile App', 'Landing Page', 'Dashboard', 'Portfolio'
 ];
 
-type OperationalMode = 'Generate PRD' | 'Plan' | 'Develop' | 'SDLC';
-const OPERATIONAL_MODES: OperationalMode[] = ['Generate PRD', 'Plan', 'Develop', 'SDLC'];
+// Mode list and entitlement rules live in lib/entitlements so the UI and the
+// API routes cannot disagree about what the free key covers.
 
 const MODE_ICONS: Record<OperationalMode, React.ReactNode> = {
     'Generate PRD': <FileText className="w-4 h-4" />,
@@ -96,167 +102,6 @@ function ModelIcon({ model, className = "w-4 h-4" }: { model?: ModelOption | nul
 
 // ── SettingsContent (inline, no separate file needed for layout) ──────────────
 
-function SettingsContent({
-    settings,
-    onChange,
-    onSave,
-    saved,
-    selectedType,
-}: {
-    settings: SettingsData;
-    onChange: (k: keyof SettingsData, v: string) => void;
-    onSave: () => void;
-    saved: boolean;
-    selectedType: ProjectType;
-}) {
-    return (
-        <div className="p-4 space-y-5">
-            {/* Project Agents */}
-            <section className="space-y-3">
-                <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    <Layers className="w-3 h-3" /> Pre-assigned Agents for {selectedType}
-                </div>
-                <div className="flex flex-wrap gap-1.5 opacity-80">
-                    {PROJECT_TYPE_DETAILS[selectedType].agents.map((agent, idx) => (
-                        <span key={idx} className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-medium border border-primary/20">
-                            {agent}
-                        </span>
-                    ))}
-                </div>
-            </section>
-            
-            <div className="h-px bg-border/60" />
-
-            {/* API Keys */}
-            <section className="space-y-3">
-                <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    <Key className="w-3 h-3" /> Model Selection & API Keys
-                </div>
-                
-                <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-foreground/70">Preferred Model Provider</label>
-                    <select 
-                        value={settings.preferredModel} 
-                        onChange={(e) => onChange('preferredModel', e.target.value)}
-                        className="w-full px-3 py-1.5 bg-muted/60 border border-border rounded-lg text-xs text-foreground outline-none focus:ring-1 focus:ring-primary/30"
-                    >
-                        <option value="test">Test (Env Key)</option>
-                        <option value="Groq">Groq (Multi-model)</option>
-                        <option value="OpenAI">OpenAI</option>
-                        <option value="Qwen">Qwen</option>
-                        <option value="Mistral AI">Mistral AI</option>
-                        <option value="Google">Google (Gemini)</option>
-                        <option value="Moonshot AI">Moonshot AI (Kimi)</option>
-                        <option value="MiniMax">MiniMax</option>
-                        <option value="DeepSeek">DeepSeek</option>
-                    </select>
-                </div>
-
-                {settings.preferredModel === 'Groq' && (
-                    <>
-                        <div className="space-y-1">
-                            <label className="text-[11px] font-medium text-foreground/70">Groq Model</label>
-                            <select 
-                                value={settings.groqModel || 'llama-3.3-70b-versatile'} 
-                                onChange={(e) => onChange('groqModel', e.target.value)}
-                                className="w-full px-3 py-1.5 bg-muted/60 border border-border rounded-lg text-xs text-foreground outline-none focus:ring-1 focus:ring-primary/30"
-                            >
-                                <optgroup label="Alibaba Cloud">
-                                    <option value="qwen-2.5-32b">qwen/qwen3-32b (via Groq)</option>
-                                </optgroup>
-                                <optgroup label="Canopy Labs">
-                                    <option value="orpheus-arabic-saudi">canopylabs/orpheus-arabic-saudi</option>
-                                    <option value="orpheus-v1-english">canopylabs/orpheus-v1-english</option>
-                                </optgroup>
-                                <optgroup label="Groq">
-                                    <option value="compound">groq/compound</option>
-                                    <option value="compound-mini">groq/compound-mini</option>
-                                </optgroup>
-                                <optgroup label="Meta">
-                                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
-                                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-                                    <option value="llama-4-scout-17b-16e-i">meta-llama/llama-4-scout-17b-16e-i...</option>
-                                    <option value="llama-prompt-guard-2-2">meta-llama/llama-prompt-guard-2-2...</option>
-                                    <option value="llama-prompt-guard-2-8">meta-llama/llama-prompt-guard-2-8...</option>
-                                </optgroup>
-                                <optgroup label="OpenAI (OSS)">
-                                    <option value="gpt-oss-120b">openai/gpt-oss-120b</option>
-                                    <option value="gpt-oss-20b">openai/gpt-oss-20b</option>
-                                    <option value="gpt-oss-safeguard-20b">openai/gpt-oss-safeguard-20b</option>
-                                </optgroup>
-                            </select>
-                        </div>
-                        <SettingInput label="Groq API Key" placeholder="gsk_..." value={settings.groqKey} onChange={v => onChange('groqKey', v)} hint="Free at console.groq.com" />
-                    </>
-                )}
-                {settings.preferredModel === 'OpenAI' && (
-                    <SettingInput label="OpenAI API Key" placeholder="sk-..." value={settings.openaiKey} onChange={v => onChange('openaiKey', v)} />
-                )}
-                {settings.preferredModel === 'Qwen' && (
-                    <SettingInput label="Qwen API Key" placeholder="sk-..." value={settings.qwenKey} onChange={v => onChange('qwenKey', v)} />
-                )}
-                {settings.preferredModel === 'Mistral AI' && (
-                    <SettingInput label="Mistral API Key" placeholder="..." value={settings.mistralKey} onChange={v => onChange('mistralKey', v)} />
-                )}
-                {settings.preferredModel === 'Google' && (
-                    <SettingInput label="Google Gemini API Key" placeholder="AIza..." value={settings.googleKey} onChange={v => onChange('googleKey', v)} />
-                )}
-                {settings.preferredModel === 'Moonshot AI' && (
-                    <SettingInput label="Moonshot AI API Key" placeholder="sk-..." value={settings.moonshotKey} onChange={v => onChange('moonshotKey', v)} />
-                )}
-                {settings.preferredModel === 'MiniMax' && (
-                    <SettingInput label="MiniMax API Key" placeholder="..." value={settings.minimaxKey} onChange={v => onChange('minimaxKey', v)} />
-                )}
-                {settings.preferredModel === 'DeepSeek' && (
-                    <SettingInput label="DeepSeek API Key" placeholder="sk-..." value={settings.deepseekKey} onChange={v => onChange('deepseekKey', v)} />
-                )}
-            </section>
-
-            <div className="h-px bg-border/60" />
-
-            {/* Jira */}
-            <section className="space-y-3">
-                <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    <Server className="w-3 h-3" /> Jira Integration
-                </div>
-                <SettingInput label="Jira Host" placeholder="https://yourco.atlassian.net" value={settings.jiraHost} onChange={v => onChange('jiraHost', v)} />
-                <SettingInput label="Email" placeholder="you@company.com" value={settings.jiraEmail} onChange={v => onChange('jiraEmail', v)} />
-                <SettingInput label="API Token" placeholder="ATATT..." value={settings.jiraApiToken} onChange={v => onChange('jiraApiToken', v)} />
-                <SettingInput label="Project Key" placeholder="PROJ" value={settings.jiraProjectKey} onChange={v => onChange('jiraProjectKey', v)} />
-            </section>
-
-            <button
-                onClick={onSave}
-                className={`w-full py-2 rounded-xl text-xs font-semibold transition-all ${saved
-                    ? 'bg-green-500/20 text-green-400'
-                    : 'bg-foreground text-background hover:opacity-90'
-                    }`}
-            >
-                {saved ? '✓ Saved' : 'Save Settings'}
-            </button>
-        </div>
-    );
-}
-
-function SettingInput({ label, placeholder, value, onChange, hint }: {
-    label: string; placeholder: string; value: string;
-    onChange: (v: string) => void; hint?: string;
-}) {
-    return (
-        <div className="space-y-1">
-            <label className="text-[11px] font-medium text-foreground/70">{label}</label>
-            <input
-                type="password"
-                placeholder={placeholder}
-                value={value}
-                onChange={e => onChange(e.target.value)}
-                className="w-full px-3 py-1.5 bg-muted/60 border border-border rounded-lg text-xs text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-1 focus:ring-primary/30"
-            />
-            {hint && <p className="text-[10px] text-muted-foreground/60">{hint}</p>}
-        </div>
-    );
-}
-
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function MainInput() {
@@ -270,6 +115,10 @@ export default function MainInput() {
     const [operationalMode, setOperationalMode] = useState<OperationalMode>('SDLC');
     const fastTrack = operationalMode !== 'SDLC';
     const [showModes, setShowModes] = useState(false);
+    const [showAuth, setShowAuth] = useState(false);
+    const [authReason, setAuthReason] = useState<string | null>(null);
+    const [gateMessage, setGateMessage] = useState<string | null>(null);
+    const { user } = useAuth();
     const modeBtnRef = useRef<HTMLButtonElement>(null);
 
     // Models
@@ -286,7 +135,7 @@ export default function MainInput() {
     const [showSettings, setShowSettings] = useState(false);
     const [settingsData, setSettingsData] = useState<SettingsData>({
         preferredModel: 'OpenAI',
-        groqModel: 'llama-3.3-70b-versatile',
+        groqModel: DEFAULT_GROQ_MODEL,
         groqKey: '', openaiKey: '', anthropicKey: '',
         googleKey: '', mistralKey: '', moonshotKey: '',
         minimaxKey: '', deepseekKey: '', qwenKey: '',
@@ -302,8 +151,15 @@ export default function MainInput() {
     // Outer wrapper ref — popovers position relative to this
     const wrapperRef = useRef<HTMLDivElement>(null);
 
+    // A user counts as "bring your own key" when they have supplied any provider key.
+    const hasOwnKey = Boolean(
+        settingsData.groqKey || settingsData.openaiKey || settingsData.anthropicKey ||
+        settingsData.googleKey || settingsData.mistralKey || settingsData.moonshotKey ||
+        settingsData.minimaxKey || settingsData.deepseekKey || settingsData.qwenKey
+    );
+
     // Computed active model based on settings
-    const activeModelId = settingsData.preferredModel === 'Groq' ? (settingsData.groqModel || 'llama-3.3-70b-versatile') : settingsData.preferredModel;
+    const activeModelId = settingsData.preferredModel === 'Groq' ? (settingsData.groqModel || DEFAULT_GROQ_MODEL) : settingsData.preferredModel;
     let activeModel = models.find(m => m.id === activeModelId || m.id.includes(activeModelId) || activeModelId.includes(m.id));
     if (!activeModel) {
         // If not found in the list, construct a fallback
@@ -401,37 +257,36 @@ export default function MainInput() {
         e.preventDefault();
         if (!input.trim() || isSubmitting) return;
         setIsSubmitting(true);
+        // Block modes the shared key does not fund, before navigating anywhere.
+        const gate = checkAccess({
+            mode: operationalMode,
+            usingSharedKey: !hasOwnKey,
+            signedIn: Boolean(user),
+        });
+        if (!gate.allowed) {
+            setIsSubmitting(false);
+            if (gate.reason === 'auth-required') {
+                setAuthReason(gate.message ?? null);
+                setShowAuth(true);
+            } else {
+                setGateMessage(gate.message ?? null);
+                setShowSettings(true);
+            }
+            return;
+        }
+
         try {
-            const userKeys: Record<string, string> = {};
-            if (settingsData.groqKey) userKeys['GROQ_API_KEY'] = settingsData.groqKey;
-            if (settingsData.openaiKey) userKeys['OPENAI_API_KEY'] = settingsData.openaiKey;
-            if (settingsData.anthropicKey) userKeys['ANTHROPIC_API_KEY'] = settingsData.anthropicKey;
+            // Hand any readable attachments to the workspace as source material.
+            const { attachments } = await extractAttachments(files);
+            saveAttachments(attachments);
 
-            const res = await fetch('/api/prd/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    topic: input.trim(),
-                    projectType: selectedType,
-                    operationalMode,
-                    modelId: activeModel?.id ?? '',
-                    userKeys: Object.keys(userKeys).length ? userKeys : undefined,
-                    maxRounds: 3,
-                    fastTrack,
-                }),
-            });
-
-            const data = res.ok ? await res.json() : {};
             const params = new URLSearchParams({
                 q: input, type: selectedType, mode: operationalMode,
                 fastTrack: fastTrack.toString(),
-                ...(data.jobId ? { jobId: data.jobId } : {}),
                 ...(activeModel ? { model: activeModel.id } : {}),
                 visibility: isPublic ? 'public' : 'private',
             });
             router.push(`/workspace?${params}`);
-        } catch {
-            router.push(`/workspace?${new URLSearchParams({ q: input, type: selectedType, mode: operationalMode, fastTrack: fastTrack.toString() })}`);
         } finally {
             setIsSubmitting(false);
         }
@@ -597,6 +452,29 @@ export default function MainInput() {
             </motion.div>
 
 
+            {/* Entitlement hint — reserves its own line so nothing reflows. */}
+            <div className="min-h-[18px] mt-2 px-1">
+                {modeRequiresOwnKey(operationalMode) && !hasOwnKey && (
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                        <Key className="w-3 h-3 flex-shrink-0" />
+                        {operationalMode} needs your own API key.
+                        <button type="button" onClick={() => setShowSettings(true)} className="text-primary hover:underline">
+                            Add one in Settings
+                        </button>
+                    </p>
+                )}
+                {!modeRequiresOwnKey(operationalMode) && !hasOwnKey && !user && (
+                    <p className="text-[11px] text-muted-foreground">
+                        {FREE_TIER_LABEL} free with an account.{' '}
+                        <button type="button" onClick={() => { setAuthReason(null); setShowAuth(true); }} className="text-primary hover:underline">
+                            Create one
+                        </button>
+                    </p>
+                )}
+            </div>
+
+            <AuthModal isOpen={showAuth} onClose={() => setShowAuth(false)} reason={authReason} />
+
             {/* ── Operational Mode Popover ─────────────────────────────── */}
             <AnimatePresence>
                 {showModes && (
@@ -612,6 +490,7 @@ export default function MainInput() {
                                 <button
                                     key={m}
                                     type="button"
+                                    title={modeRequiresOwnKey(m) && !hasOwnKey ? 'Requires your own API key' : undefined}
                                     onClick={() => { setOperationalMode(m); setShowModes(false); }}
                                     className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs transition-colors text-left
                                         ${operationalMode === m
@@ -620,6 +499,9 @@ export default function MainInput() {
                                 >
                                     {MODE_ICONS[m]}
                                     <span className="flex-1 font-medium">{m}</span>
+                                    {modeRequiresOwnKey(m) && !hasOwnKey && (
+                                        <Key className="w-3 h-3 text-muted-foreground/70 flex-shrink-0" />
+                                    )}
                                     {operationalMode === m && <Check className="w-3 h-3 text-primary flex-shrink-0" />}
                                 </button>
                             ))}
@@ -646,13 +528,15 @@ export default function MainInput() {
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
-                        <div className="max-h-[400px] overflow-y-auto">
-                            <SettingsContent
-                                settings={settingsData}
-                                onChange={(k, v) => setSettingsData(prev => ({ ...prev, [k]: v }))}
-                                onSave={saveSettings}
-                                saved={settingsSaved}
-                                selectedType={selectedType}
+                        {gateMessage && (
+                            <p className="px-4 py-2.5 text-[11px] text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
+                                {gateMessage}
+                            </p>
+                        )}
+                        <div className="max-h-[min(420px,60vh)] overflow-y-auto custom-scrollbar">
+                            <SettingsForm
+                                onSaved={(next) => { setSettingsData(next); setGateMessage(null); }}
+                                onRequestSignIn={() => { setAuthReason(null); setShowAuth(true); }}
                             />
                         </div>
                         <div className="px-4 py-2 border-t border-border bg-muted/20">

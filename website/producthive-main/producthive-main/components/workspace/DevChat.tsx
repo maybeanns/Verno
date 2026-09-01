@@ -3,8 +3,11 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Send, Loader2, Sparkles, Check, AlertCircle, ChevronRight, Code2, Layers, Shield, Package, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { loadSettings } from '@/components/landing/SettingsPanel';
+import { loadSettings } from '@/lib/settings';
 import type { GeneratedFile } from './CodePanel';
+import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { authHeaders } from '@/lib/auth-headers';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,8 +52,8 @@ const CODEGEN_STEPS: Omit<ThinkingStep, 'status'>[] = [
 function detectProvider(): { provider: string; apiKey: string; model?: string } | null {
     const s = loadSettings();
     if (!s.preferredModel) return null;
-    if (s.preferredModel === 'test') return { provider: 'test', apiKey: 'test', model: 'llama-3.3-70b-versatile' };
-    if (s.preferredModel === 'Groq' && s.groqKey) return { provider: 'Groq', apiKey: s.groqKey, model: s.groqModel || 'llama-3.3-70b-versatile' };
+    if (s.preferredModel === 'test') return { provider: 'test', apiKey: 'test', model: DEFAULT_GROQ_MODEL };
+    if (s.preferredModel === 'Groq' && s.groqKey) return { provider: 'Groq', apiKey: s.groqKey, model: s.groqModel || DEFAULT_GROQ_MODEL };
     if (s.preferredModel === 'OpenAI' && s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
     if (s.preferredModel === 'Qwen' && s.qwenKey) return { provider: 'Qwen', apiKey: s.qwenKey };
     if (s.preferredModel === 'Mistral AI' && s.mistralKey) return { provider: 'Mistral AI', apiKey: s.mistralKey };
@@ -75,6 +78,7 @@ export default function DevChat({
     onProjectNameChange,
     saveSnapshot,
 }: DevChatProps) {
+    const { accessToken } = useAuth();
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -161,7 +165,7 @@ export default function DevChat({
         try {
             const res = await fetch('/api/codegen', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(accessToken),
                 body: JSON.stringify({
                     topic: query,
                     provider,

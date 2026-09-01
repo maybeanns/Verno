@@ -3,7 +3,11 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Send, Loader2, User, Sparkles, Check, AlertCircle, ChevronRight, FileCode2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { loadSettings } from '@/components/landing/SettingsPanel';
+import { loadSettings } from '@/lib/settings';
+import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { loadAttachments } from '@/lib/attachments';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { authHeaders } from '@/lib/auth-headers';
 
 interface AgentInfo { name: string; color: string; }
 interface Message {
@@ -36,8 +40,8 @@ const THINKING_STEPS: Omit<ThinkingStep, 'status'>[] = [
 function detectProvider(): { provider: string; apiKey: string; model?: string } | null {
     const s = loadSettings();
     if (!s.preferredModel) return null;
-    if (s.preferredModel === 'test') return { provider: 'test', apiKey: 'test', model: 'llama-3.3-70b-versatile' };
-    if (s.preferredModel === 'Groq' && s.groqKey) return { provider: 'Groq', apiKey: s.groqKey, model: s.groqModel || 'llama-3.3-70b-versatile' };
+    if (s.preferredModel === 'test') return { provider: 'test', apiKey: 'test', model: DEFAULT_GROQ_MODEL };
+    if (s.preferredModel === 'Groq' && s.groqKey) return { provider: 'Groq', apiKey: s.groqKey, model: s.groqModel || DEFAULT_GROQ_MODEL };
     if (s.preferredModel === 'OpenAI' && s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
     if (s.preferredModel === 'Qwen' && s.qwenKey) return { provider: 'Qwen', apiKey: s.qwenKey };
     if (s.preferredModel === 'Mistral AI' && s.mistralKey) return { provider: 'Mistral AI', apiKey: s.mistralKey };
@@ -72,6 +76,7 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const abortRef = useRef<AbortController | null>(null);
+    const { accessToken } = useAuth();
 
     useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, steps]);
 
@@ -99,9 +104,31 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
     }, []);
 
     async function runDebateStream(provider: string, apiKey: string, signal: AbortSignal, model?: string) {
+        const attachments = loadAttachments();
+        if (attachments.length > 0) {
+            setMessages(prev => [...prev, {
+                id: 'grounding',
+                role: 'system',
+                content: `📎 Using ${attachments.length} attached file${attachments.length === 1 ? '' : 's'} as source material: ${attachments.map(a => a.name).join(', ')}`,
+                timestamp: new Date(),
+            }]);
+        }
         try {
-            const res = await fetch('/api/debate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: query, provider, apiKey, projectType, model, fastTrack, mode }), signal });
-            if (!res.ok) { const errText = await res.text(); throw new Error(`API error ${res.status}: ${errText}`); }
+            const res = await fetch('/api/debate', { method: 'POST', headers: authHeaders(accessToken), body: JSON.stringify({ topic: query, provider, apiKey, projectType, model, fastTrack, mode, attachments }), signal });
+            if (!res.ok) {
+                const errText = await res.text();
+                // 401/403/429 come from the entitlement guard and already carry
+                // a user-facing explanation; show it verbatim.
+                if ([401, 403, 429].includes(res.status)) {
+                    try {
+                        const parsed = JSON.parse(errText);
+                        if (parsed?.error) throw new Error(parsed.error);
+                    } catch (parseErr: any) {
+                        if (parseErr?.message && parseErr.message !== 'Unexpected end of JSON input') throw parseErr;
+                    }
+                }
+                throw new Error(`API error ${res.status}: ${errText}`);
+            }
             const reader = res.body?.getReader();
             if (!reader) throw new Error('No response stream');
             const decoder = new TextDecoder();

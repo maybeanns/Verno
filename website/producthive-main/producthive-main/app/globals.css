@@ -8,10 +8,16 @@
     --foreground: 0 0% 98%;
   }
 
+  /* The document scrollbar belongs to the viewport, which takes its styles from
+     <html>, not <body>. Reserving the gutter on body had no effect, so content
+     jumped sideways whenever a scrollbar appeared or disappeared. */
+  html {
+    scrollbar-gutter: stable;
+  }
+
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
-    scrollbar-gutter: stable;
   }
 }
 

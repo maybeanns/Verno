@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hexagon, X, BookOpen, MessageSquare, Lightbulb } from 'lucide-react';
+import { Hexagon, X, BookOpen, MessageSquare, Lightbulb, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
-import SettingsPanel from './SettingsPanel';
+import { useAuth } from '@/components/auth/AuthProvider';
+import AuthModal from '@/components/auth/AuthModal';
 
 /**
  * Concave fillet corners — the 20×20 div sits OUTSIDE the tab.
@@ -36,8 +37,10 @@ function ConcaveRight({ color }: { color: string }) {
 }
 
 export default function Navbar() {
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isHelpOpen, setIsHelpOpen] = useState(false);
+    const [isAuthOpen, setIsAuthOpen] = useState(false);
+    const [isAccountOpen, setIsAccountOpen] = useState(false);
+    const { user, loading, configured, signOut } = useAuth();
     const pathname = usePathname();
 
     // Don't render the global navbar on workspace pages — it has its own header
@@ -85,17 +88,58 @@ export default function Navbar() {
 
                         <button onClick={() => setIsHelpOpen(true)} className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Help</button>
                         <Link href="/pricing" className="text-[13px] font-display font-medium text-white/70 hover:text-[#FBBF24] transition-colors tracking-tight">Pricing</Link>
-                        <button onClick={() => setIsSettingsOpen(true)} className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Profile</button>
+                        {!configured || loading ? (
+                            <Link href="/profile" className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Profile</Link>
+                        ) : user ? (
+                            <div className="relative">
+                                <button
+                                    onClick={() => setIsAccountOpen(v => !v)}
+                                    className="flex items-center gap-1.5 text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight"
+                                >
+                                    <span className="w-5 h-5 rounded-full bg-[#DD830A] text-white text-[10px] font-semibold flex items-center justify-center flex-shrink-0">
+                                        {(user.email ?? '?').charAt(0).toUpperCase()}
+                                    </span>
+                                    <ChevronDown className={`w-3 h-3 opacity-70 transition-transform ${isAccountOpen ? 'rotate-180' : ''}`} />
+                                </button>
+
+                                <AnimatePresence>
+                                    {isAccountOpen && (
+                                        <motion.div
+                                            initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                                            transition={{ duration: 0.12 }}
+                                            className="absolute right-0 top-[calc(100%+10px)] w-56 bg-card border border-border rounded-xl shadow-2xl overflow-hidden z-50"
+                                        >
+                                            <div className="px-3 py-2.5 border-b border-border">
+                                                <p className="text-[11px] text-muted-foreground">Signed in as</p>
+                                                <p className="text-[12px] text-foreground truncate">{user.email}</p>
+                                            </div>
+                                            <Link
+                                                href="/profile"
+                                                onClick={() => setIsAccountOpen(false)}
+                                                className="block px-3 py-2 text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                            >
+                                                Profile &amp; API keys
+                                            </Link>
+                                            <button
+                                                onClick={() => { setIsAccountOpen(false); void signOut(); }}
+                                                className="w-full text-left px-3 py-2 text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                            >
+                                                Sign out
+                                            </button>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        ) : (
+                            <button onClick={() => setIsAuthOpen(true)} className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Sign in</button>
+                        )}
                     </div>
                 </motion.div>
             </nav>
 
-            {/* Profile / Settings Panel */}
-            <SettingsPanel
-                isOpen={isSettingsOpen}
-                onClose={() => setIsSettingsOpen(false)}
-                onSave={() => setIsSettingsOpen(false)}
-            />
+            <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
 
             {/* Help Modal */}
             <AnimatePresence>

@@ -19,6 +19,8 @@
  */
 
 import { NextRequest } from 'next/server';
+import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { guardSharedKeyUsage } from '@/lib/api-guard';
 
 import {
     extractSections,
@@ -35,11 +37,35 @@ interface SectionSpec {
     brief: string;
 }
 
-const ENFORCED_STACK = `ENFORCED STACK:
-- React 18+ with TypeScript (Vite is strictly used as the frontend build tool/bundler)
+// The stack is a real engineering decision, so it follows the project type
+// rather than forcing a single web stack onto every kind of product.
+const STACK_BY_PROJECT_TYPE: Record<string, string> = {
+    'Full Stack App': `- React 18+ with TypeScript (Vite is strictly the frontend build tool/bundler)
 - Tailwind CSS for styling
 - shadcn/ui for UI components
-- Supabase for backend (auth, database, storage) or a custom Node.js/Express backend where appropriate`;
+- Supabase for backend (auth, database, storage) or a custom Node.js/Express backend where appropriate`,
+    'Dashboard': `- React 18+ with TypeScript (Vite is strictly the frontend build tool/bundler)
+- Tailwind CSS for styling
+- shadcn/ui for UI components, with Recharts or visx for data visualisation
+- Supabase for backend (auth, database, storage) or a custom Node.js/Express backend where appropriate`,
+    'Mobile App': `- React Native 0.74+ with TypeScript, built and delivered with Expo (SDK 51+)
+- NativeWind (Tailwind for React Native) for styling
+- React Navigation for routing, with over-the-air updates via EAS Update
+- Supabase for backend (auth, database, storage) or a custom Node.js/Express backend where appropriate`,
+    'Landing Page': `- React 18+ with TypeScript, statically built with Astro or a Next.js static export for first-load performance and SEO
+- Tailwind CSS for styling
+- shadcn/ui for UI components
+- No application backend by default: forms post to a single serverless function or a hosted form service`,
+    'Portfolio': `- React 18+ with TypeScript, statically built with Astro or a Next.js static export for first-load performance and SEO
+- Tailwind CSS for styling
+- shadcn/ui for UI components
+- Content from local MDX or a headless CMS. No application backend, user accounts, or billing by default`,
+};
+
+function stackFor(projectType: string): string {
+    const stack = STACK_BY_PROJECT_TYPE[projectType] ?? STACK_BY_PROJECT_TYPE['Full Stack App'];
+    return `ENFORCED STACK (for a ${projectType}):\n${stack}`;
+}
 
 const PRD_SECTIONS: SectionSpec[] = [
     {
@@ -64,7 +90,7 @@ const PRD_SECTIONS: SectionSpec[] = [
     },
     {
         title: 'TECHNICAL ARCHITECTURE',
-        brief: 'System architecture diagram description (frontend, API gateway, services, workers, DB, cache, storage). Tech stack with version numbers and justifications. Infrastructure spec (cloud provider, regions, containerization, orchestration, environment strategy dev/staging/prod). Scalability plan (horizontal scaling, load balancing, auto-scaling triggers). Dependency map table (third-party services/libraries with license types and risk flags). Monitoring and observability (logging, APM, alerting). Backup and disaster recovery plan (RPO and RTO targets). CRITICAL: Vite is strictly a frontend build tool/bundler; the API Gateway and backend/worker microservices MUST NOT be built using or described as running on Vite. Specify actual backend technologies (e.g., Kong, Supabase Edge Functions, Node.js).',
+        brief: 'System architecture diagram description (frontend, API gateway, services, workers, DB, cache, storage). Tech stack with version numbers and justifications. Infrastructure spec (cloud provider, regions, containerization, orchestration, environment strategy dev/staging/prod). Scalability plan (horizontal scaling, load balancing, auto-scaling triggers). Dependency map table (third-party services/libraries with license types and risk flags). Monitoring and observability (logging, APM, alerting). Backup and disaster recovery plan (RPO and RTO targets). CRITICAL: the frontend build tool named in the stack (Vite, Expo, Astro) bundles the client only; the API Gateway and backend/worker microservices MUST NOT be described as running on it. Specify actual backend technologies (e.g., Kong, Supabase Edge Functions, Node.js).',
     },
     {
         title: 'API SPECIFICATION',
@@ -147,6 +173,37 @@ const PLAN_SECTIONS: SectionSpec[] = [
     },
 ];
 
+// F4: a portfolio site has no pricing tiers, subscription lifecycle, or
+// per-severity support SLA. Padding every project with the full enterprise
+// section set is what makes generated PRDs read as boilerplate.
+const SECTIONS_OMITTED_BY_PROJECT_TYPE: Record<string, string[]> = {
+    'Landing Page': [
+        'API SPECIFICATION',
+        'DATA MODEL',
+        'BILLING & SUBSCRIPTION MANAGEMENT',
+        'SLA, SUPPORT & OPERATIONS',
+    ],
+    'Portfolio': [
+        'BUSINESS STRATEGY',
+        'API SPECIFICATION',
+        'DATA MODEL',
+        'BILLING & SUBSCRIPTION MANAGEMENT',
+        'SLA, SUPPORT & OPERATIONS',
+    ],
+};
+
+function sectionsFor(projectType: string, isPlanMode: boolean): SectionSpec[] {
+    if (isPlanMode) {
+        return PLAN_SECTIONS;
+    }
+    const omitted = SECTIONS_OMITTED_BY_PROJECT_TYPE[projectType];
+    if (!omitted) {
+        return PRD_SECTIONS;
+    }
+    const drop = new Set(omitted.map(titleKey));
+    return PRD_SECTIONS.filter((spec) => !drop.has(titleKey(spec.title)));
+}
+
 const QUALITY_RULES = `QUALITY RULES:
 - Ground every detail in the actual topic. Never carry over examples, competitor names, metrics, or threat scenarios from an unrelated product domain.
 - Use tables wherever lists of items have multiple attributes.
@@ -155,8 +212,61 @@ const QUALITY_RULES = `QUALITY RULES:
 - No vague language: replace "fast", "secure", "scalable" with specific measurable targets.
 - Flag any section where an assumption was made.
 - Write each section in full depth — an engineering team must be able to build from it without asking clarifying questions.
-- Never mix frontend build systems (Vite) with backend gateways or runtimes in architectural specifications.
-- Enforce TLS 1.3 minimum for all in-transit communications.`;
+- Never describe the frontend build tool as the runtime for a backend gateway or service.
+- Enforce TLS 1.3 minimum for all in-transit communications.
+
+EVIDENCE RULES (these override the instruction to be specific):
+- NEVER invent a citation. Do not attribute a statistic to a named body, survey, or report unless you are certain that source exists and says that. A fabricated citation is far worse than no citation, because it cannot be checked and it will be repeated.
+- You have no research tools and no market data. Every figure you write is your estimate, not a finding, and must not be dressed up as one.
+- Still commit to concrete numbers so the team has something to plan against, but append [UNVERIFIED] to every figure you cannot source, e.g. "TAM approximately $30M [UNVERIFIED]" or "62% of clinics use paper diaries [UNVERIFIED]".
+- End any section containing estimates with a short "To verify" list naming who should confirm each figure before build.
+
+CONSISTENCY RULES:
+- The ENFORCED STACK above is the single source of truth. Do not introduce a second framework, database, auth provider, or payment provider anywhere in the document.
+- Do not re-implement what a managed service in the stack already provides. If the stack uses a managed auth provider, do NOT define your own users table with a password or password_hash column; model application profile data only and reference the provider's user id as a foreign key.
+- Reuse the exact entity, table, field, and endpoint names already established in this document. Never rename the same concept.
+- Name only third-party services this product actually uses. If the source material or an earlier section rules a vendor out, or names a required vendor for a job (payments, invoicing, email, hosting), that decision is binding everywhere in the document — including compliance, operations, and test sections. Do not reintroduce a rejected vendor as an example, a DPA counterparty, or a default.`;
+
+// ─── F1: grounding from user-supplied files ─────────────────────────────────
+// Without this the pipeline has no input beyond a one-line topic, so every
+// fact in the document is invented. Attached briefs, notes, or specs are the
+// only real evidence available to it.
+
+interface Attachment {
+    name: string;
+    text: string;
+}
+
+const MAX_GROUNDING_CHARS = 12_000;
+
+function buildGroundingBlock(attachments: Attachment[] | undefined): string {
+    if (!attachments?.length) {
+        return '';
+    }
+
+    const budget = Math.floor(MAX_GROUNDING_CHARS / attachments.length);
+    const parts: string[] = [];
+    for (const file of attachments) {
+        const text = (file.text || '').trim();
+        if (!text) {
+            continue;
+        }
+        const clipped =
+            text.length > budget ? `${text.slice(0, budget)}\n…[truncated]` : text;
+        parts.push(`--- ${file.name} ---\n${clipped}`);
+    }
+    if (parts.length === 0) {
+        return '';
+    }
+
+    return `
+SOURCE MATERIAL SUPPLIED BY THE USER — this is real evidence and outranks your own assumptions.
+Prefer facts, names, numbers, and constraints stated here over anything you would otherwise estimate.
+Figures taken from this material do NOT need an [UNVERIFIED] marker; cite them as "per the supplied ${parts.length === 1 ? 'document' : 'documents'}".
+
+${parts.join('\n\n')}
+`;
+}
 
 // ─── Agent definitions (identical to extension) ─────────────────────────────
 
@@ -209,6 +319,40 @@ interface DebateMessage {
 
 // ─── LLM Call abstraction ───────────────────────────────────────────────────
 
+const RATE_LIMIT_RETRIES = 6;
+const MAX_RATE_LIMIT_WAIT_MS = 75_000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Parses a Groq/OpenAI-style duration such as "26.587s" or "2m52.8s" into ms. */
+function parseDuration(value: string | null): number | null {
+    if (!value) {
+        return null;
+    }
+    const plain = Number(value);
+    if (Number.isFinite(plain)) {
+        return plain * 1000;
+    }
+    const match = value.match(/(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?/);
+    if (!match || (!match[1] && !match[2])) {
+        return null;
+    }
+    return (Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0)) * 1000;
+}
+
+/** How long to wait after a 429, preferring the server's own guidance. */
+function parseRetryDelayMs(headers: Headers, attempt: number): number {
+    const advised =
+        parseDuration(headers.get('retry-after')) ??
+        parseDuration(headers.get('x-ratelimit-reset-tokens')) ??
+        parseDuration(headers.get('x-ratelimit-reset-requests'));
+    // Exponential backoff when the server gives us nothing to go on.
+    const fallback = Math.min(2000 * 2 ** attempt, MAX_RATE_LIMIT_WAIT_MS);
+    const chosen = advised ?? fallback;
+    // A small buffer avoids landing exactly on the boundary and re-tripping.
+    return Math.min(chosen + 1000, MAX_RATE_LIMIT_WAIT_MS);
+}
+
 async function callLLM(
     prompt: string,
     provider: string,
@@ -245,13 +389,13 @@ async function callLLM(
         case 'test':
             url = 'https://api.groq.com/openai/v1/chat/completions';
             apiKey = process.env.GROQ_API_KEY || apiKey;
-            model = modelId !== 'test' && modelId ? modelId : 'llama-3.3-70b-versatile';
+            model = modelId !== 'test' && modelId ? modelId : DEFAULT_GROQ_MODEL;
             break;
         case 'Groq':
         case 'groq':
         case 'Meta': // Kept for backwards compatibility
             url = 'https://api.groq.com/openai/v1/chat/completions';
-            model = modelId || 'llama-3.3-70b-versatile';
+            model = modelId || DEFAULT_GROQ_MODEL;
             break;
         case 'OpenAI':
         case 'openai':
@@ -305,27 +449,23 @@ async function callLLM(
 
     let res = await makeRequest(model);
 
-    // Fallback logic for Groq/Test
-    if (!res.ok && res.status === 429 && (provider.toLowerCase() === 'groq' || provider === 'test')) {
-        const fallbacks = [
-            'llama-3.1-8b-instant',
-            'llama-3.3-70b-versatile',
-            'meta-llama/llama-4-scout-17b-16e-instruct',
-            'meta-llama/llama-prompt-guard-2-22m',
-            'qwen/qwen3-32b',
-            'Qwen/Qwen2.5-32B-Instruct'
-        ];
+    // Rate limiting: free tiers cap tokens-per-minute well below what a full
+    // document costs, so a 429 means "wait", not "use a different model".
+    // Swapping models mid-document also makes sections stylistically
+    // inconsistent, so retry the same one and honour the advised delay.
+    for (let attempt = 0; attempt < RATE_LIMIT_RETRIES && res.status === 429; attempt++) {
+        const waitMs = parseRetryDelayMs(res.headers, attempt);
+        console.warn(
+            `[callLLM] 429 on ${model}. Waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${RATE_LIMIT_RETRIES}.`
+        );
+        await sleep(waitMs);
+        res = await makeRequest(model);
+    }
 
-        for (const fallbackModel of fallbacks) {
-            if (fallbackModel === model) continue; // Skip if it was the primary model
-
-            console.warn(`[callLLM] 429 on primary model. Falling back to ${fallbackModel}...`);
-            res = await makeRequest(fallbackModel);
-
-            if (res.ok || res.status !== 429) {
-                break; // Stop falling back if we succeeded or got a non-rate-limit error
-            }
-        }
+    if (res.status === 429) {
+        throw new Error(
+            `${provider} rate limit exceeded for "${model}" after ${RATE_LIMIT_RETRIES} retries. Wait a minute and try again, or switch to a model with a higher quota in Settings.`
+        );
     }
 
     if (!res.ok) {
@@ -341,7 +481,8 @@ function buildAgentPrompt(
     agentId: string,
     role: string,
     history: DebateMessage[],
-    round: number
+    round: number,
+    grounding: string
 ): string {
     const recentHistory = history.slice(-6);
     const historyText =
@@ -356,7 +497,7 @@ function buildAgentPrompt(
 
     return `You are the ${role} on a product team.
 Topic: "${topic}"
-
+${grounding}
 Recent debate:
 ${historyText}
 
@@ -367,6 +508,7 @@ RULES:
 - Everything you say must be about THIS topic. Do not import examples, competitors, metrics, or scenarios from an unrelated product domain.
 - Be SPECIFIC: name tools, frameworks, numbers, thresholds — not generic advice.
 - Every claim needs a concrete example or metric.
+- Never invent a citation or attribute a statistic to a named survey or report. Mark figures you cannot source with [UNVERIFIED].
 - Max 150 words. No filler.`;
 }
 
@@ -399,7 +541,7 @@ const AGENT_SPECIFICS: Record<string, { r1: string; r2: string }> = {
         r2: "Refine personas to be highly specific based on feedback. Add measurable KPIs (churn, NPS, activation rate, retention). Finalize the pricing strategy (do not defer this). Design free-tier limits around this product's actual cost drivers so the free tier cannot be abused or turned into a cost sink. Define what MVP success looks like in numbers.",
     },
     architect: {
-        r1: "Propose a concrete technical architecture. Describe the exact end-to-end data flow for this product's core operation. Specify scaling rules (how many instances, at what trigger?), expected latency or processing time for the real operations this product performs, and where the bottleneck is. Include an architecture diagram description. CRITICAL: Vite is strictly a frontend build tool/bundler; the API Gateway and backend/worker services MUST NOT be built using or described as running on Vite. Specify actual backend technologies (e.g., Kong, Supabase Edge Functions, or Node.js/Express). Design core API endpoints (method, path, request/response schema) and authentication flows (OAuth2/JWT, SSO/SAML).",
+        r1: "Propose a concrete technical architecture. Describe the exact end-to-end data flow for this product's core operation. Specify scaling rules (how many instances, at what trigger?), expected latency or processing time for the real operations this product performs, and where the bottleneck is. Include an architecture diagram description. CRITICAL: the frontend build tool named in the stack bundles the client only; the API Gateway and backend/worker services MUST NOT be described as running on it. Specify actual backend technologies (e.g., Kong, Supabase Edge Functions, or Node.js/Express). Design core API endpoints (method, path, request/response schema) and authentication flows (OAuth2/JWT, SSO/SAML).",
         r2: "Respond to feasibility concerns. Address failure handling for this product's critical operations: what happens on a mid-operation crash — partial result, retry, or idempotent replay? State explicit performance specs: separate interactive UI/API response latency (target < 200ms p95) from any long-running background job duration, and specify async notification (WebSocket/SSE) wherever a job outlasts a request. Enforce TLS 1.3 minimum for all in-transit encryption.",
     },
     ux: {
@@ -407,7 +549,7 @@ const AGENT_SPECIFICS: Record<string, { r1: string; r2: string }> = {
         r2: "Refine the primary screen layouts. How are the product's recommendations or next actions presented to the user? Add UI acceptance criteria (load times, mobile breakpoints). Define the error states for this product's real failure modes.",
     },
     developer: {
-        r1: 'List the exact tech stack (languages, frameworks, libraries, databases). Define the project structure. What build tools, CI/CD pipeline, and deployment strategy? Estimate implementation complexity for each core feature. Explicitly differentiate Vite (frontend compiler) from the backend/gateway execution runtime. Create a Dependency Map detailing every third-party service and package this product actually needs, along with their open-source or commercial licenses and any risk flags.',
+        r1: 'List the exact tech stack (languages, frameworks, libraries, databases). Define the project structure. What build tools, CI/CD pipeline, and deployment strategy? Estimate implementation complexity for each core feature. Explicitly differentiate the frontend build tool from the backend/gateway execution runtime. Create a Dependency Map detailing every third-party service and package this product actually needs, along with their open-source or commercial licenses and any risk flags.',
         r2: 'Respond to architecture proposals. Identify technical debt risks. Propose a specific testing strategy. What needs to be built in-house vs adopted from open source?',
     },
     pm: {
@@ -436,12 +578,17 @@ const AGENT_SPECIFICS: Record<string, { r1: string; r2: string }> = {
 
 const SECTION_BATCH_SIZE = 5;
 const BATCH_MAX_TOKENS = 4000;
-const SINGLE_SECTION_MAX_TOKENS = 1600;
+// A lone retry gets the same budget as a whole batch: it costs the same against
+// a per-minute token quota either way, and reasoning models spend a large fixed
+// slice of the budget thinking before they emit any content. Under-provisioning
+// here made the retry — the last chance to recover a section — always truncate.
+const SINGLE_SECTION_MAX_TOKENS = BATCH_MAX_TOKENS;
 
 function buildSectionBatchPrompt(
     topic: string,
     projectType: string,
     contextBlock: string,
+    priorDigest: string,
     specs: SectionSpec[],
     startNumber: number,
     totalSections: number,
@@ -468,8 +615,8 @@ function buildSectionBatchPrompt(
 Topic: "${topic}"
 Project Type: "${projectType}"
 
-${ENFORCED_STACK}
-${contextBlock}
+${stackFor(projectType)}
+${contextBlock}${priorDigest}
 ${scopeLine}
 Write ONLY the sections listed below. Do not write any other section, do not repeat sections from other parts of the document, and do not summarise the document as a whole.
 
@@ -487,6 +634,37 @@ ${sectionList}
 ${QUALITY_RULES}`;
 }
 
+
+const DIGEST_CHARS_PER_SECTION = 260;
+
+/**
+ * Summarises the sections already written so later batches stay consistent with
+ * the decisions earlier ones made, rather than re-deciding the stack, the data
+ * model, or the payment provider from scratch.
+ */
+function buildPriorDigest(collected: Map<string, PRDSection>, specs: SectionSpec[]): string {
+    const written: string[] = [];
+    for (const spec of specs) {
+        const section = collected.get(titleKey(spec.title));
+        if (!section) {
+            continue;
+        }
+        const flat = section.content.replace(/\s+/g, ' ').trim();
+        const clipped =
+            flat.length > DIGEST_CHARS_PER_SECTION
+                ? `${flat.slice(0, DIGEST_CHARS_PER_SECTION)}…`
+                : flat;
+        written.push(`- ${spec.title}: ${clipped}`);
+    }
+    if (written.length === 0) {
+        return '';
+    }
+
+    return `
+ALREADY WRITTEN IN THIS DOCUMENT — stay consistent with these decisions and reuse their exact names:
+${written.join('\n')}
+`;
+}
 
 /**
  * Generates every requested section, batch by batch, retrying individually for
@@ -512,6 +690,7 @@ async function generateSections(
             topic,
             projectType,
             contextBlock,
+            buildPriorDigest(collected, specs),
             batch,
             i + 1,
             specs.length,
@@ -542,6 +721,7 @@ async function generateSections(
             topic,
             projectType,
             contextBlock,
+            buildPriorDigest(collected, specs),
             [spec],
             index,
             specs.length,
@@ -767,7 +947,7 @@ export async function POST(request: NextRequest) {
     } catch (e) {
         // Body is empty or malformed
     }
-    const { topic, provider, apiKey, projectType, model, fastTrack, mode } = body as {
+    const { topic, provider, apiKey, projectType, model, fastTrack, mode, attachments } = body as {
         topic: string;
         provider: string;
         apiKey: string;
@@ -775,6 +955,7 @@ export async function POST(request: NextRequest) {
         model?: string;
         fastTrack?: boolean;
         mode?: string;
+        attachments?: Attachment[];
     };
 
     if (!topic || !provider || !apiKey) {
@@ -784,10 +965,21 @@ export async function POST(request: NextRequest) {
         });
     }
 
+    // The shared key only funds single-PRD generation for signed-in users.
+    // Every other mode must be paid for with the caller's own key.
+    const guard = await guardSharedKeyUsage(request, {
+        provider,
+        mode: mode || 'Generate PRD',
+    });
+    if (!guard.ok) {
+        return guard.response!;
+    }
+
     const resolvedProjectType = projectType || 'Full Stack App';
     const isPlanMode = mode === 'Plan';
-    const specs = isPlanMode ? PLAN_SECTIONS : PRD_SECTIONS;
+    const specs = sectionsFor(resolvedProjectType, isPlanMode);
     const docKind: 'PRD' | 'PLAN' = isPlanMode ? 'PLAN' : 'PRD';
+    const groundingBlock = buildGroundingBlock(attachments);
 
     // Create a readable stream for SSE
     const encoder = new TextEncoder();
@@ -835,6 +1027,8 @@ export async function POST(request: NextRequest) {
                     missingSections: missing,
                 });
                 send('done', { success: true });
+                // Only spend the daily allowance once a document actually landed.
+                void guard.commit?.();
             };
 
             try {
@@ -850,7 +1044,7 @@ export async function POST(request: NextRequest) {
                         specs,
                         topic,
                         resolvedProjectType,
-                        '',
+                        groundingBlock,
                         docKind,
                         provider,
                         apiKey,
@@ -884,7 +1078,7 @@ export async function POST(request: NextRequest) {
                             round,
                         });
 
-                        const prompt = buildAgentPrompt(topic, agent.id, agent.role, history, round);
+                        const prompt = buildAgentPrompt(topic, agent.id, agent.role, history, round, groundingBlock);
                         const response = await callLLM(prompt, provider, apiKey, model);
 
                         const msg: DebateMessage = {
@@ -942,7 +1136,7 @@ export async function POST(request: NextRequest) {
                     .map(([id, content]) => `[${id.toUpperCase()}]: ${content}`)
                     .join('\n');
 
-                const contextBlock = `
+                const contextBlock = `${groundingBlock}
 AGENT CONSENSUS AND INPUTS:
 ${condensed}
 

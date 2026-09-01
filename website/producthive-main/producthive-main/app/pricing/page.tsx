@@ -6,7 +6,7 @@ import { Check } from 'lucide-react';
 
 export default function PricingPage() {
     return (
-        <main className="min-h-screen bg-background relative overflow-x-hidden flex flex-col items-center">
+        <main className="min-h-screen bg-background relative overflow-x-clip flex flex-col items-center">
             <HoneycombBackground />
             <div className="fixed inset-0 bg-gradient-mesh opacity-40 pointer-events-none" />
             <div className="fixed inset-0 bg-gradient-radial from-transparent via-background/50 to-background pointer-events-none" />
