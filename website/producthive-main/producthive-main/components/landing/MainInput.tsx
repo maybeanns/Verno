@@ -306,13 +306,13 @@ export default function MainInput() {
                     ${isFocused ? 'ring-1 ring-primary/20' : ''}`}
             >
                 {/* Project type tabs */}
-                <div className="flex border-b border-border bg-muted/40">
+                <div className="flex border-b border-border bg-muted/40 overflow-x-auto md:overflow-x-visible custom-scrollbar">
                     {PROJECT_TYPES.map(t => (
                         <button
                             key={t}
                             type="button"
                             onClick={() => setSelectedType(t)}
-                            className={`flex-1 py-2 px-1 text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5
+                            className={`flex-shrink-0 whitespace-nowrap px-2.5 md:flex-1 md:flex-shrink md:px-1 py-2 text-[11px] font-medium transition-colors flex items-center justify-center gap-1.5
                                 ${selectedType === t ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                         >
                             {selectedType === t && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
@@ -356,10 +356,10 @@ export default function MainInput() {
                     </div>
 
                     {/* Bottom toolbar */}
-                    <div className="flex items-center justify-between px-3 py-2 border-t border-border/50 bg-muted/20">
+                    <div className="flex items-center justify-between gap-2 px-2 sm:px-3 py-2 border-t border-border/50 bg-muted/20">
 
                         {/* Left side */}
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 min-w-0">
                             {/* Attach */}
                             <input ref={fileRef} type="file" multiple className="hidden"
                                 accept=".txt,.md,.json,.csv,.pdf,.doc,.docx"
@@ -380,7 +380,7 @@ export default function MainInput() {
                                 ref={modeBtnRef}
                                 type="button"
                                 onClick={() => { setShowModes(v => !v); setShowSettings(false); }}
-                                className={`flex items-center pl-2 pr-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-transparent w-[140px] flex-shrink-0 justify-between box-border
+                                className={`flex items-center pl-2 pr-2 py-1.5 rounded-lg text-xs font-medium transition-colors border border-transparent w-[112px] md:w-[140px] flex-shrink-0 justify-between box-border
                                     ${showModes
                                         ? 'bg-muted !border-border text-foreground'
                                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -394,7 +394,7 @@ export default function MainInput() {
                             </button>
 
                             {/* Model display */}
-                            <div className="flex items-center pl-2 pr-2 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-transparent w-[160px] flex-shrink-0 justify-start box-border select-none">
+                            <div className="hidden md:flex items-center pl-2 pr-2 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-transparent w-[160px] flex-shrink-0 justify-start box-border select-none">
                                 <div className="flex items-center gap-1.5 overflow-hidden">
                                     <ModelIcon model={activeModel} className="w-4 h-4" />
                                     <span className="truncate">{activeModel?.name ?? 'No model selected'}</span>
@@ -403,11 +403,11 @@ export default function MainInput() {
                         </div>
 
                         {/* Right side */}
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-shrink-0">
                             {/* Public / Private */}
                             <button type="button" onClick={() => setIsPublic(v => !v)}
                                 title={isPublic ? 'Public repo' : 'Private repo'}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors min-w-[80px] justify-center box-border
+                                className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors min-w-[80px] justify-center box-border
                                     ${isPublic
                                         ? 'border-border text-muted-foreground hover:text-foreground hover:bg-muted/50'
                                         : 'border-amber-500/40 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20'
@@ -534,6 +534,47 @@ export default function MainInput() {
                             </p>
                         )}
                         <div className="max-h-[min(420px,60vh)] overflow-y-auto custom-scrollbar">
+                            {/* Toolbar controls that are hidden on small screens live here instead. */}
+                            <div className="md:hidden px-4 pt-4 space-y-4">
+                                <section className="space-y-2">
+                                    <h4 className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                        <Server className="w-3 h-3" />
+                                        Active model
+                                    </h4>
+                                    <div className="flex items-center gap-2 px-3 py-2.5 bg-muted/50 border border-border rounded-lg">
+                                        <ModelIcon model={activeModel} className="w-4 h-4 flex-shrink-0" />
+                                        <span className="text-xs text-foreground truncate">{activeModel?.name ?? 'No model selected'}</span>
+                                    </div>
+                                </section>
+
+                                <section className="space-y-2">
+                                    <h4 className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                        {isPublic ? <Globe className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                                        Repository visibility
+                                    </h4>
+                                    <div className="grid grid-cols-2 gap-1 p-1 bg-muted/40 border border-border rounded-lg">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsPublic(true)}
+                                            className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors
+                                                ${isPublic ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                                        >
+                                            <Globe className="w-3 h-3" />
+                                            Public
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsPublic(false)}
+                                            className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-colors
+                                                ${!isPublic ? 'bg-amber-500/15 text-amber-400' : 'text-muted-foreground hover:text-foreground'}`}
+                                        >
+                                            <Lock className="w-3 h-3" />
+                                            Private
+                                        </button>
+                                    </div>
+                                </section>
+                            </div>
+
                             <SettingsForm
                                 onSaved={(next) => { setSettingsData(next); setGateMessage(null); }}
                                 onRequestSignIn={() => { setAuthReason(null); setShowAuth(true); }}

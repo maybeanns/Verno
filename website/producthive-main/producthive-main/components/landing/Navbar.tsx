@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hexagon, X, BookOpen, MessageSquare, Lightbulb, ChevronDown } from 'lucide-react';
-import { useState } from 'react';
+import { Hexagon, X, BookOpen, MessageSquare, Lightbulb, ChevronDown, Menu } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import AuthModal from '@/components/auth/AuthModal';
 
@@ -40,8 +40,12 @@ export default function Navbar() {
     const [isHelpOpen, setIsHelpOpen] = useState(false);
     const [isAuthOpen, setIsAuthOpen] = useState(false);
     const [isAccountOpen, setIsAccountOpen] = useState(false);
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
     const { user, loading, configured, signOut } = useAuth();
     const pathname = usePathname();
+
+    // Collapse the mobile menu whenever the route changes
+    useEffect(() => { setIsMenuOpen(false); }, [pathname]);
 
     // Don't render the global navbar on workspace pages — it has its own header
     if (pathname?.startsWith('/workspace')) return null;
@@ -55,7 +59,7 @@ export default function Navbar() {
 
     return (
         <>
-            <nav className="fixed top-0 left-0 right-0 z-[100] flex justify-between px-10 pointer-events-none">
+            <nav className="fixed top-0 left-0 right-0 z-[100] flex justify-between items-start px-6 sm:px-10 pointer-events-none">
 
                 {/* ── Left Tab — Brand ── */}
                 <motion.div
@@ -64,13 +68,13 @@ export default function Navbar() {
                     transition={{ duration: 0.4, ease: 'easeOut' }}
                     className="relative pointer-events-auto"
                 >
-                    <div className="relative bg-[#DD830A] px-5 py-2.5 rounded-b-[20px] flex items-center gap-2 text-white">
+                    <div className="relative bg-[#DD830A] px-4 py-2 md:px-5 md:py-2.5 rounded-b-[20px] flex items-center gap-2 text-white">
                         <ConcaveLeft color="#DD830A" />
                         <ConcaveRight color="#DD830A" />
 
                         <Link href="/" onClick={handleHomeClick} className="flex items-center gap-2 hover:opacity-90 transition-opacity">
-                            <Hexagon className="w-4 h-4 fill-white/20 flex-shrink-0" strokeWidth={2.5} />
-                            <span className="font-display font-semibold tracking-tight text-sm whitespace-nowrap">ProductHive</span>
+                            <Hexagon className="w-3.5 h-3.5 md:w-4 md:h-4 fill-white/20 flex-shrink-0" strokeWidth={2.5} />
+                            <span className="font-display font-semibold tracking-tight text-[12px] md:text-sm whitespace-nowrap">ProductHive</span>
                         </Link>
                     </div>
                 </motion.div>
@@ -82,62 +86,155 @@ export default function Navbar() {
                     transition={{ duration: 0.4, ease: 'easeOut', delay: 0.05 }}
                     className="relative pointer-events-auto"
                 >
-                    <div className="relative bg-[#0A0A0A] px-7 py-2.5 rounded-b-[20px] flex items-center gap-7 text-white">
+                    {/* Same seated tab at every width: convex lower shoulders (rounded-b)
+                        dropped into the concave cutouts. On mobile the tab simply grows
+                        downward to hold the burger menu instead of changing shape. */}
+                    <div className="relative bg-[#0A0A0A] rounded-b-[20px] text-white">
                         <ConcaveLeft color="#0A0A0A" />
                         <ConcaveRight color="#0A0A0A" />
 
-                        <button onClick={() => setIsHelpOpen(true)} className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Help</button>
-                        <Link href="/pricing" className="text-[13px] font-display font-medium text-white/70 hover:text-[#FBBF24] transition-colors tracking-tight">Pricing</Link>
-                        {!configured || loading ? (
-                            <Link href="/profile" className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Profile</Link>
-                        ) : user ? (
-                            <div className="relative">
-                                <button
-                                    onClick={() => setIsAccountOpen(v => !v)}
-                                    className="flex items-center gap-1.5 text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight"
-                                >
-                                    <span className="w-5 h-5 rounded-full bg-[#DD830A] text-white text-[10px] font-semibold flex items-center justify-center flex-shrink-0">
-                                        {(user.email ?? '?').charAt(0).toUpperCase()}
-                                    </span>
-                                    <ChevronDown className={`w-3 h-3 opacity-70 transition-transform ${isAccountOpen ? 'rotate-180' : ''}`} />
-                                </button>
+                        {/* ── Desktop: inline links ── */}
+                        <div className="hidden md:flex items-center gap-7 px-7 py-2.5">
+                            <button onClick={() => setIsHelpOpen(true)} className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Help</button>
+                            <Link href="/pricing" className="text-[13px] font-display font-medium text-white/70 hover:text-[#FBBF24] transition-colors tracking-tight">Pricing</Link>
+                            {!configured || loading ? (
+                                <Link href="/profile" className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Profile</Link>
+                            ) : user ? (
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setIsAccountOpen(v => !v)}
+                                        className="flex items-center gap-1.5 text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight"
+                                    >
+                                        <span className="w-5 h-5 rounded-full bg-[#DD830A] text-white text-[10px] font-semibold flex items-center justify-center flex-shrink-0">
+                                            {(user.email ?? '?').charAt(0).toUpperCase()}
+                                        </span>
+                                        <ChevronDown className={`w-3 h-3 opacity-70 transition-transform ${isAccountOpen ? 'rotate-180' : ''}`} />
+                                    </button>
 
-                                <AnimatePresence>
-                                    {isAccountOpen && (
-                                        <motion.div
-                                            initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                                            exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                                            transition={{ duration: 0.12 }}
-                                            className="absolute right-0 top-[calc(100%+10px)] w-56 bg-card border border-border rounded-xl shadow-2xl overflow-hidden z-50"
-                                        >
-                                            <div className="px-3 py-2.5 border-b border-border">
-                                                <p className="text-[11px] text-muted-foreground">Signed in as</p>
-                                                <p className="text-[12px] text-foreground truncate">{user.email}</p>
-                                            </div>
-                                            <Link
-                                                href="/profile"
-                                                onClick={() => setIsAccountOpen(false)}
-                                                className="block px-3 py-2 text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                    <AnimatePresence>
+                                        {isAccountOpen && (
+                                            <motion.div
+                                                initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                                                transition={{ duration: 0.12 }}
+                                                className="absolute right-0 top-[calc(100%+10px)] w-56 bg-card border border-border rounded-xl shadow-2xl overflow-hidden z-50"
                                             >
-                                                Profile &amp; API keys
-                                            </Link>
+                                                <div className="px-3 py-2.5 border-b border-border">
+                                                    <p className="text-[11px] text-muted-foreground">Signed in as</p>
+                                                    <p className="text-[12px] text-foreground truncate">{user.email}</p>
+                                                </div>
+                                                <Link
+                                                    href="/profile"
+                                                    onClick={() => setIsAccountOpen(false)}
+                                                    className="block px-3 py-2 text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                                >
+                                                    Profile &amp; API keys
+                                                </Link>
+                                                <button
+                                                    onClick={() => { setIsAccountOpen(false); void signOut(); }}
+                                                    className="w-full text-left px-3 py-2 text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                                >
+                                                    Sign out
+                                                </button>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+                            ) : (
+                                <button onClick={() => setIsAuthOpen(true)} className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Sign in</button>
+                            )}
+                        </div>
+
+                        {/* ── Mobile: burger seated in the same tab ── */}
+                        <div className="md:hidden flex flex-col items-end">
+                            <button
+                                onClick={() => setIsMenuOpen(v => !v)}
+                                aria-label="Toggle navigation menu"
+                                aria-expanded={isMenuOpen}
+                                className="flex items-center justify-center px-4 py-2 text-white/80 hover:text-white transition-colors"
+                            >
+                                {isMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                                {isMenuOpen && (
+                                    <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.2, ease: 'easeOut' }}
+                                        className="overflow-hidden"
+                                    >
+                                        <div className="w-[186px] px-4 pb-2.5 pt-0.5 flex flex-col divide-y divide-white/10">
                                             <button
-                                                onClick={() => { setIsAccountOpen(false); void signOut(); }}
-                                                className="w-full text-left px-3 py-2 text-[12px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                                onClick={() => { setIsMenuOpen(false); setIsHelpOpen(true); }}
+                                                className="py-2 text-left text-[12px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight"
                                             >
-                                                Sign out
+                                                Help
                                             </button>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-                            </div>
-                        ) : (
-                            <button onClick={() => setIsAuthOpen(true)} className="text-[13px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight">Sign in</button>
-                        )}
+                                            <Link
+                                                href="/pricing"
+                                                onClick={() => setIsMenuOpen(false)}
+                                                className="py-2 text-[12px] font-display font-medium text-white/70 hover:text-[#FBBF24] transition-colors tracking-tight"
+                                            >
+                                                Pricing
+                                            </Link>
+
+                                            {!configured || loading ? (
+                                                <Link
+                                                    href="/profile"
+                                                    onClick={() => setIsMenuOpen(false)}
+                                                    className="py-2 text-[12px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight"
+                                                >
+                                                    Profile
+                                                </Link>
+                                            ) : user ? (
+                                                <>
+                                                    <div className="py-2 flex items-center gap-2">
+                                                        <span className="w-4 h-4 rounded-full bg-[#DD830A] text-white text-[9px] font-semibold flex items-center justify-center flex-shrink-0">
+                                                            {(user.email ?? '?').charAt(0).toUpperCase()}
+                                                        </span>
+                                                        <span className="text-[11px] text-white/50 truncate">{user.email}</span>
+                                                    </div>
+                                                    <Link
+                                                        href="/profile"
+                                                        onClick={() => setIsMenuOpen(false)}
+                                                        className="py-2 text-[12px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight"
+                                                    >
+                                                        Profile &amp; API keys
+                                                    </Link>
+                                                    <button
+                                                        onClick={() => { setIsMenuOpen(false); void signOut(); }}
+                                                        className="py-2 text-left text-[12px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight"
+                                                    >
+                                                        Sign out
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <button
+                                                    onClick={() => { setIsMenuOpen(false); setIsAuthOpen(true); }}
+                                                    className="py-2 text-left text-[12px] font-display font-medium text-white/70 hover:text-white transition-colors tracking-tight"
+                                                >
+                                                    Sign in
+                                                </button>
+                                            )}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
                     </div>
                 </motion.div>
             </nav>
+
+            {/* Tap-outside catcher for the mobile menu */}
+            {isMenuOpen && (
+                <div
+                    className="fixed inset-0 z-[99] md:hidden"
+                    onClick={() => setIsMenuOpen(false)}
+                />
+            )}
 
             <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
 
