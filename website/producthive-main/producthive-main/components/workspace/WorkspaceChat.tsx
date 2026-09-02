@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { Send, Loader2, User, Sparkles, Check, AlertCircle, ChevronRight, FileCode2 } from 'lucide-react';
+import { Send, Loader2, User, Sparkles, Check, AlertCircle, ChevronRight, FileCode2, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { loadSettings } from '@/lib/settings';
-import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL, GROQ_MODEL_IDS } from '@/lib/models';
 import { loadAttachments } from '@/lib/attachments';
+import { clearPrdRun, loadPrdRun, savePrdRun, type PrdRunIdentity } from '@/lib/prd-cache';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { authHeaders } from '@/lib/auth-headers';
 
@@ -48,6 +49,7 @@ function detectProvider(): { provider: string; apiKey: string; model?: string } 
     if (s.preferredModel === 'Moonshot AI' && s.moonshotKey) return { provider: 'Moonshot AI', apiKey: s.moonshotKey };
     if (s.preferredModel === 'MiniMax' && s.minimaxKey) return { provider: 'MiniMax', apiKey: s.minimaxKey };
     if (s.preferredModel === 'DeepSeek' && s.deepseekKey) return { provider: 'DeepSeek', apiKey: s.deepseekKey };
+    if (s.preferredModel === 'Anthropic' && s.anthropicKey) return { provider: 'Anthropic', apiKey: s.anthropicKey };
     if (s.groqKey) return { provider: 'Meta', apiKey: s.groqKey };
     if (s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
     if (s.anthropicKey) return { provider: 'Anthropic', apiKey: s.anthropicKey };
@@ -57,7 +59,7 @@ function detectProvider(): { provider: string; apiKey: string; model?: string } 
     return { provider: 'test', apiKey: 'shared', model: DEFAULT_GROQ_MODEL };
 }
 
-export default function WorkspaceChat({ query, projectType, mode, agents, onPRDReady, fastTrack }: WorkspaceChatProps) {
+export default function WorkspaceChat({ query, projectType, mode, model, agents, onPRDReady, fastTrack }: WorkspaceChatProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -75,12 +77,63 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
     const [mentionIndex, setMentionIndex] = useState(0);
     const [currentRound, setCurrentRound] = useState(0);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    /** When set, this run came from cache rather than a fresh debate. */
+    const [restoredAt, setRestoredAt] = useState<number | null>(null);
+    /** Epoch ms the provider's token quota refills, while we are waiting on it. */
+    const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null);
+    const [rateLimitLeft, setRateLimitLeft] = useState(0);
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const abortRef = useRef<AbortController | null>(null);
+    const prdRef = useRef<{ title: string; markdown: string } | null>(null);
+    const savedRef = useRef(false);
     const { accessToken } = useAuth();
 
+    /** Identifies this exact run, so a different prompt or mode caches separately. */
+    const runIdentity = useMemo<PrdRunIdentity>(
+        () => ({ query, mode, projectType, model, fastTrack: Boolean(fastTrack) }),
+        [query, mode, projectType, model, fastTrack]
+    );
+
+    const regenerate = useCallback(() => {
+        clearPrdRun(runIdentity);
+        // The whole flow is mount-driven; a reload is the honest way to redo it.
+        window.location.reload();
+    }, [runIdentity]);
+
+    // Cache the finished run once, so reopening this link replays it instead of
+    // spending another few minutes and another free-tier run on the same PRD.
+    useEffect(() => {
+        if (!thinkingDone || savedRef.current || !prdRef.current) {
+            return;
+        }
+        savedRef.current = true;
+        savePrdRun(runIdentity, {
+            title: prdRef.current.title,
+            markdown: prdRef.current.markdown,
+            messages,
+        });
+    }, [thinkingDone, messages, runIdentity]);
+
     useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, steps]);
+
+    // Free provider tiers cap tokens per minute, so a long run spends real time
+    // waiting for the quota to refill. Counting it down is the difference
+    // between "working" and "frozen" from the user's side.
+    useEffect(() => {
+        if (rateLimitUntil === null) {
+            setRateLimitLeft(0);
+            return;
+        }
+        const tick = () => {
+            const left = Math.max(0, Math.ceil((rateLimitUntil - Date.now()) / 1000));
+            setRateLimitLeft(left);
+            if (left === 0) setRateLimitUntil(null);
+        };
+        tick();
+        const id = setInterval(tick, 1000);
+        return () => clearInterval(id);
+    }, [rateLimitUntil]);
 
     const filteredAgents = useMemo(() => {
         if (!mentionFilter) return agents;
@@ -89,7 +142,24 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
     }, [agents, mentionFilter]);
 
     useEffect(() => {
-        setMessages([{ id: 'init', role: 'user', content: query, timestamp: new Date() }]);
+        const opening: Message = { id: 'init', role: 'user', content: query, timestamp: new Date() };
+
+        // Replay a finished run rather than regenerating an identical document.
+        const cached = loadPrdRun(runIdentity);
+        if (cached) {
+            const revived = (cached.messages as Message[])
+                .filter(m => m && typeof m.content === 'string')
+                .map(m => ({ ...m, timestamp: new Date(m.timestamp) }));
+            setMessages(revived.length > 0 ? revived : [opening]);
+            setSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
+            setThinkingDone(true);
+            setRestoredAt(cached.savedAt);
+            savedRef.current = true; // nothing new to write back
+            onPRDReady(cached.title, cached.markdown);
+            return;
+        }
+
+        setMessages([opening]);
         const creds = detectProvider();
         if (!creds) {
             setErrorMsg('No API key configured. Open Settings and add a key.');
@@ -97,10 +167,16 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
             setMessages(prev => [...prev, { id: 'err-key', role: 'system', content: '⚠️ No API key found. Please configure one in Settings.', timestamp: new Date() }]);
             return;
         }
+        // The model in the URL wins, except on the shared key — that always
+        // routes to Groq, so a non-Groq id there would 404 on every call.
+        const requestedModel =
+            model && (creds.provider !== 'test' || GROQ_MODEL_IDS.includes(model))
+                ? model
+                : creds.model;
         setSteps(prev => prev.map((s, i) => ({ ...s, status: i === 0 ? 'active' : 'pending' })));
         const controller = new AbortController();
         abortRef.current = controller;
-        runDebateStream(creds.provider, creds.apiKey, controller.signal, creds.model);
+        runDebateStream(creds.provider, creds.apiKey, controller.signal, requestedModel);
         return () => { controller.abort(); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -179,6 +255,7 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
                 setMessages(prev => [...prev, { id: `consensus-${Date.now()}`, role: 'agent', agentName: '🤝 ' + data.agentName + ' (Consensus)', agentColor: data.agentColor, content: data.content, round: data.round, debateType: 'consensus', timestamp: new Date() }]);
                 break;
             case 'prd-progress': {
+                setRateLimitUntil(null);
                 // The document is generated section-batch by section-batch; keep
                 // the step label live so a long PRD phase never looks stalled.
                 const base = mode === 'Plan' ? 'Generating Architectural & Sprint Plan' : 'Generating PRD document';
@@ -187,11 +264,18 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
                     : s));
                 break;
             }
+            case 'rate-limit':
+                // Not an error: the provider's per-minute token quota is spent
+                // and the run resumes by itself once it refills.
+                setRateLimitUntil(data.resumeAt ?? Date.now() + (data.waitMs ?? 0));
+                break;
             case 'warning':
                 setMessages(prev => [...prev, { id: 'warn-' + Date.now(), role: 'system', content: `⚠️ ${data.message}`, timestamp: new Date() }]);
                 break;
             case 'prd-complete':
+                setRateLimitUntil(null);
                 onPRDReady(data.title, data.markdown);
+                prdRef.current = { title: data.title, markdown: data.markdown };
                 setThinkingDone(true);
                 setSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
                 setMessages(prev => [...prev, { id: 'prd-done', role: 'system', content: `✅ PRD generated! ${data.sections?.length ?? 0} sections${data.missingSections?.length ? ` (${data.missingSections.length} incomplete)` : ''}. View it in the right panel.`, timestamp: new Date() }]);
@@ -303,6 +387,25 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
                     </motion.div>
                 ))}
 
+                {/* Restored from cache — say so, and offer the way back out */}
+                {restoredAt !== null && (
+                    <div className="flex flex-wrap items-center gap-2 text-[12px] text-white/40">
+                        <Check className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                        <span>
+                            Showing the PRD generated on{' '}
+                            {new Date(restoredAt).toLocaleString()}.
+                        </span>
+                        <button
+                            type="button"
+                            onClick={regenerate}
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-white/[0.08] text-white/60 hover:text-white/90 hover:bg-white/[0.05] transition-colors"
+                        >
+                            <RotateCcw className="w-3 h-3" />
+                            Regenerate
+                        </button>
+                    </div>
+                )}
+
                 {/* Inline thinking steps — rendered inside the chat like Bolt */}
                 {!thinkingDone && messages.length > 0 && (
                     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
@@ -343,6 +446,13 @@ export default function WorkspaceChat({ query, projectType, mode, agents, onPRDR
                                 </div>
                             ))}
                         </div>
+
+                        {rateLimitLeft > 0 && (
+                            <p className="pl-7 text-[12px] text-amber-400/70">
+                                Provider token quota reached — resuming in {rateLimitLeft}s. Add your own
+                                API key in Settings for a higher limit.
+                            </p>
+                        )}
                     </motion.div>
                 )}
 

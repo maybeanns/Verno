@@ -12,6 +12,7 @@ import { ProjectType } from '@/lib/types/agent-types';
 import { loadSettings, type SettingsData } from '@/lib/settings';
 import { DEFAULT_GROQ_MODEL, GROQ_MODEL_GROUPS } from '@/lib/models';
 import { extractAttachments, saveAttachments } from '@/lib/attachments';
+import { buildWorkspacePath } from '@/lib/workspace-url';
 import { checkAccess, modeRequiresOwnKey, OPERATIONAL_MODES, FREE_TIER_LABEL, type OperationalMode } from '@/lib/entitlements';
 import { useAuth } from '@/components/auth/AuthProvider';
 import AuthModal from '@/components/auth/AuthModal';
@@ -280,13 +281,14 @@ export default function MainInput() {
             const { attachments } = await extractAttachments(files);
             saveAttachments(attachments);
 
-            const params = new URLSearchParams({
-                q: input, type: selectedType, mode: operationalMode,
-                fastTrack: fastTrack.toString(),
-                ...(activeModel ? { model: activeModel.id } : {}),
+            router.push(buildWorkspacePath({
+                query: input,
+                projectType: selectedType,
+                mode: operationalMode,
+                fastTrack,
+                model: activeModel?.id,
                 visibility: isPublic ? 'public' : 'private',
-            });
-            router.push(`/workspace?${params}`);
+            }));
         } finally {
             setIsSubmitting(false);
         }

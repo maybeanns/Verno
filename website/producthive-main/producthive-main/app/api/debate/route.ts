@@ -321,36 +321,143 @@ interface DebateMessage {
 
 const RATE_LIMIT_RETRIES = 6;
 const MAX_RATE_LIMIT_WAIT_MS = 75_000;
+/** A single completion never legitimately takes this long; past it the socket is hung. */
+const REQUEST_TIMEOUT_MS = 120_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Parses a Groq/OpenAI-style duration such as "26.587s" or "2m52.8s" into ms. */
+/**
+ * Per-run rate-limit state.
+ *
+ * Free provider tiers cap tokens-per-minute far below what a full document
+ * costs (Groq's free tier is 8k TPM against a ~20k-token PRD), so the limit is
+ * hit on nearly every run. Reacting to 429s alone was the reason a run could
+ * sit for ten minutes: each 429 costs a wasted round trip and then an
+ * exponential backoff that routinely overshoots the real refill window.
+ *
+ * Every response carries the remaining token budget and the exact refill time,
+ * so we track them and wait precisely — and only when the next call genuinely
+ * does not fit. On a paid key the budget never runs low and nothing ever waits.
+ */
+interface LLMContext {
+    /** Tokens left in the current window, or null when unknown/just refilled. */
+    remainingTokens: number | null;
+    /** Epoch ms at which the token bucket refills. */
+    resetAt: number;
+    /** Reports a deliberate wait so the stream can show it instead of stalling. */
+    onWait?: (ms: number, reason: string) => void;
+}
+
+function newLLMContext(onWait?: (ms: number, reason: string) => void): LLMContext {
+    return { remainingTokens: null, resetAt: 0, onWait };
+}
+
+/** Records the budget a provider reported, so the next call can plan around it. */
+function recordBudget(ctx: LLMContext | undefined, headers: Headers): void {
+    if (!ctx) {
+        return;
+    }
+    const remaining = Number(headers.get('x-ratelimit-remaining-tokens'));
+    if (Number.isFinite(remaining)) {
+        ctx.remainingTokens = remaining;
+    }
+    const reset = parseDuration(headers.get('x-ratelimit-reset-tokens'));
+    if (reset !== null) {
+        ctx.resetAt = Date.now() + reset;
+    }
+}
+
+/** Waits out the refill window when the next call cannot fit in what is left. */
+async function awaitBudget(ctx: LLMContext | undefined, estimatedCost: number): Promise<void> {
+    if (!ctx || ctx.remainingTokens === null || ctx.remainingTokens >= estimatedCost) {
+        return;
+    }
+    const waitMs = Math.min(Math.max(0, ctx.resetAt - Date.now()) + 500, MAX_RATE_LIMIT_WAIT_MS);
+    if (waitMs <= 0) {
+        return;
+    }
+    ctx.onWait?.(waitMs, 'token quota');
+    await sleep(waitMs);
+    // The window has rolled over; the next response re-measures it.
+    ctx.remainingTokens = null;
+}
+
+/**
+ * Parses a Groq/OpenAI-style duration into milliseconds: "7", "26.587s",
+ * "2m52.8s", "1h3m", "547ms".
+ *
+ * The "ms" suffix is the one that matters most and was previously misread. The
+ * old pattern was anchorless with every part optional, so "547ms" matched its
+ * minutes group and became 547 MINUTES — nine hours, clamped to the maximum
+ * wait. Groq reports a nearly-full token bucket in milliseconds, so the healthy
+ * case ("resets in half a second") was being turned into a 75-second stall on
+ * every retry. Units are matched longest-first and the whole string must match,
+ * so an unrecognised format returns null instead of a plausible-looking number.
+ */
+const DURATION_UNITS_MS: Record<string, number> = {
+    ms: 1,
+    s: 1000,
+    m: 60_000,
+    h: 3_600_000,
+    d: 86_400_000,
+};
+
 function parseDuration(value: string | null): number | null {
     if (!value) {
         return null;
     }
-    const plain = Number(value);
+    const text = value.trim();
+
+    // A bare number is seconds, per the HTTP Retry-After delay-seconds form.
+    const plain = Number(text);
     if (Number.isFinite(plain)) {
         return plain * 1000;
     }
-    const match = value.match(/(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?/);
-    if (!match || (!match[1] && !match[2])) {
+
+    const parts = text.match(/\d+(?:\.\d+)?(?:ms|[smhd])/gi);
+    if (!parts || parts.join('') !== text.replace(/\s+/g, '')) {
         return null;
     }
-    return (Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0)) * 1000;
+
+    let total = 0;
+    for (const part of parts) {
+        const [, amount, unit] = part.match(/^(\d+(?:\.\d+)?)(ms|[smhd])$/i)!;
+        total += Number(amount) * DURATION_UNITS_MS[unit.toLowerCase()];
+    }
+    return total;
 }
 
-/** How long to wait after a 429, preferring the server's own guidance. */
-function parseRetryDelayMs(headers: Headers, attempt: number): number {
+/**
+ * How long to wait after a 429, preferring the server's own guidance.
+ *
+ * Returns null when the provider says the window will not reopen within
+ * MAX_RATE_LIMIT_WAIT_MS. That is a daily or hourly cap rather than the
+ * per-minute one, and sitting through six clamped retries only spends another
+ * seven minutes to fail anyway — the caller should give up and say so.
+ */
+function parseRetryDelayMs(headers: Headers, attempt: number): number | null {
+    // `retry-after` is the only true retry hint. `x-ratelimit-reset-tokens` is a
+    // usable stand-in because it is the per-minute bucket. `reset-requests` is
+    // deliberately not consulted: on Groq it counts down a rolling daily window
+    // (tens of minutes) and reading it as a retry delay makes a routine
+    // per-minute 429 look like an unrecoverable one.
     const advised =
         parseDuration(headers.get('retry-after')) ??
-        parseDuration(headers.get('x-ratelimit-reset-tokens')) ??
-        parseDuration(headers.get('x-ratelimit-reset-requests'));
+        parseDuration(headers.get('x-ratelimit-reset-tokens'));
+
+    // Some providers state outright that this request will never succeed.
+    if (headers.get('x-should-retry') === 'false' && advised === null) {
+        return null;
+    }
+
+    if (advised !== null) {
+        // A small buffer avoids landing exactly on the boundary and re-tripping.
+        const withBuffer = advised + 1000;
+        return withBuffer > MAX_RATE_LIMIT_WAIT_MS ? null : withBuffer;
+    }
+
     // Exponential backoff when the server gives us nothing to go on.
-    const fallback = Math.min(2000 * 2 ** attempt, MAX_RATE_LIMIT_WAIT_MS);
-    const chosen = advised ?? fallback;
-    // A small buffer avoids landing exactly on the boundary and re-tripping.
-    return Math.min(chosen + 1000, MAX_RATE_LIMIT_WAIT_MS);
+    return Math.min(2000 * 2 ** attempt, MAX_RATE_LIMIT_WAIT_MS);
 }
 
 async function callLLM(
@@ -358,22 +465,43 @@ async function callLLM(
     provider: string,
     apiKey: string,
     modelId?: string,
-    maxTokens: number = 800
+    maxTokens: number = 800,
+    ctx?: LLMContext
 ): Promise<string> {
+    // Prompt tokens are roughly a quarter of the character count; the completion
+    // can use the whole budget. Both are billed against the same per-minute cap.
+    const estimatedCost = Math.ceil(prompt.length / 4) + maxTokens;
+
     if (provider === 'Anthropic' || provider === 'anthropic') {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01',
-            },
-            body: JSON.stringify({
-                model: 'claude-3-5-sonnet-20240620',
-                max_tokens: maxTokens,
-                messages: [{ role: 'user', content: prompt }],
-            }),
-        });
+        const anthropicRequest = () =>
+            fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': apiKey,
+                    'anthropic-version': '2023-06-01',
+                },
+                body: JSON.stringify({
+                    model: 'claude-3-5-sonnet-20240620',
+                    max_tokens: maxTokens,
+                    messages: [{ role: 'user', content: prompt }],
+                }),
+                signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            });
+
+        await awaitBudget(ctx, estimatedCost);
+        let res = await anthropicRequest();
+        // Anthropic rate-limits per minute too, and its keys are the ones users
+        // bring themselves — a 429 here must not fail the whole document.
+        for (let attempt = 0; attempt < RATE_LIMIT_RETRIES && res.status === 429; attempt++) {
+            const waitMs = parseRetryDelayMs(res.headers, attempt);
+            if (waitMs === null) {
+                break;
+            }
+            ctx?.onWait?.(waitMs, 'Anthropic rate limit');
+            await sleep(waitMs);
+            res = await anthropicRequest();
+        }
         if (!res.ok) {
             const errBody = await res.text();
             throw new Error(`Anthropic API error (${res.status}): ${errBody}`);
@@ -444,10 +572,16 @@ async function callLLM(
                 max_tokens: maxTokens,
                 temperature: 0.7,
             }),
+            // Without this a hung socket stalls the whole SSE stream forever.
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
     };
 
+    // Spend the known budget before firing: a request we can already tell will
+    // 429 costs a round trip and then a backoff that overshoots the real refill.
+    await awaitBudget(ctx, estimatedCost);
     let res = await makeRequest(model);
+    recordBudget(ctx, res.headers);
 
     // Rate limiting: free tiers cap tokens-per-minute well below what a full
     // document costs, so a 429 means "wait", not "use a different model".
@@ -455,16 +589,34 @@ async function callLLM(
     // inconsistent, so retry the same one and honour the advised delay.
     for (let attempt = 0; attempt < RATE_LIMIT_RETRIES && res.status === 429; attempt++) {
         const waitMs = parseRetryDelayMs(res.headers, attempt);
+        if (waitMs === null) {
+            // An hourly or daily cap: waiting is pointless, so stop retrying and
+            // let the 429 below produce a message the user can act on.
+            break;
+        }
         console.warn(
             `[callLLM] 429 on ${model}. Waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${RATE_LIMIT_RETRIES}.`
         );
+        ctx?.onWait?.(waitMs, `${provider} rate limit`);
         await sleep(waitMs);
         res = await makeRequest(model);
+        recordBudget(ctx, res.headers);
     }
 
     if (res.status === 429) {
+        // Daily and per-minute caps need different advice, and telling someone
+        // who is out for the day to "wait a minute" just wastes their time.
+        // The provider states which one it is, so quote it.
+        const detail = await res.text().catch(() => '');
+        const perDay = /per day|TPD|RPD/i.test(detail);
+        const advice = perDay
+            ? `The daily quota for this key is used up. Add your own API key in Settings for a higher limit, or try again tomorrow.`
+            : `Wait a minute and try again, or switch to a model with a higher quota in Settings.`;
+        // Matches the duration grammar itself so the sentence's full stop is not
+        // swallowed into the quoted time ("7m39.648s." → "7m39.648s").
+        const stated = detail.match(/Please try again in ((?:\d+(?:\.\d+)?(?:ms|[smhd]))+)/i);
         throw new Error(
-            `${provider} rate limit exceeded for "${model}" after ${RATE_LIMIT_RETRIES} retries. Wait a minute and try again, or switch to a model with a higher quota in Settings.`
+            `${provider} rate limit reached for "${model}"${stated ? ` (retry in ${stated[1]})` : ''}. ${advice}`
         );
     }
 
@@ -576,13 +728,28 @@ const AGENT_SPECIFICS: Record<string, { r1: string; r2: string }> = {
 // validated independently, and any section a batch failed to produce is
 // retried on its own rather than taking the whole document down with it.
 
-const SECTION_BATCH_SIZE = 5;
+// Three, not five. An exhaustive PRD section costs ~1,100 completion tokens and
+// a reasoning model spends ~900 more thinking, so five sections did not fit in
+// BATCH_MAX_TOKENS: every batch was cut off mid-array and silently lost its
+// last two sections. Those then went to the per-section recovery pass, which on
+// a per-minute token quota cost several minutes and usually failed anyway.
+// Three sections leave real headroom, so batches now complete and the recovery
+// pass stays the exception it was meant to be.
+const SECTION_BATCH_SIZE = 3;
 const BATCH_MAX_TOKENS = 4000;
 // A lone retry gets the same budget as a whole batch: it costs the same against
 // a per-minute token quota either way, and reasoning models spend a large fixed
 // slice of the budget thinking before they emit any content. Under-provisioning
 // here made the retry — the last chance to recover a section — always truncate.
 const SINGLE_SECTION_MAX_TOKENS = BATCH_MAX_TOKENS;
+// How many sections the recovery pass will retry individually. See the comment
+// at the retry loop: this bounds the worst case rather than improving the best.
+const MAX_SECTION_RETRIES = 6;
+
+/** True for a failure that further calls cannot recover from (quota exhausted). */
+function isQuotaError(err: unknown): boolean {
+    return err instanceof Error && /rate limit reached/i.test(err.message);
+}
 
 function buildSectionBatchPrompt(
     topic: string,
@@ -680,11 +847,16 @@ async function generateSections(
     provider: string,
     apiKey: string,
     model: string | undefined,
-    onProgress: (done: number, total: number) => void
+    onProgress: (done: number, total: number) => void,
+    ctx?: LLMContext
 ): Promise<{ sections: PRDSection[]; missing: string[] }> {
     const collected = new Map<string, PRDSection>();
+    // Set once the provider says the quota is gone for good. Every further call
+    // would fail the same way, so we stop instead of grinding through the rest
+    // of the document and returning a mostly empty one.
+    let quotaError: Error | null = null;
 
-    for (let i = 0; i < specs.length; i += SECTION_BATCH_SIZE) {
+    for (let i = 0; i < specs.length && !quotaError; i += SECTION_BATCH_SIZE) {
         const batch = specs.slice(i, i + SECTION_BATCH_SIZE);
         const prompt = buildSectionBatchPrompt(
             topic,
@@ -698,7 +870,7 @@ async function generateSections(
         );
 
         try {
-            const raw = await callLLM(prompt, provider, apiKey, model, BATCH_MAX_TOKENS);
+            const raw = await callLLM(prompt, provider, apiKey, model, BATCH_MAX_TOKENS, ctx);
             for (const section of extractSections(raw)) {
                 const key = titleKey(section.title);
                 if (batch.some((s) => titleKey(s.title) === key) && !collected.has(key)) {
@@ -707,6 +879,9 @@ async function generateSections(
             }
         } catch (err) {
             console.warn(`[generateSections] batch starting at section ${i + 1} failed:`, err);
+            if (isQuotaError(err)) {
+                quotaError = err as Error;
+            }
         }
 
         onProgress(Math.min(i + batch.length, specs.length), specs.length);
@@ -714,7 +889,14 @@ async function generateSections(
 
     // Per-section retry for anything the batches missed. A lone section has
     // plenty of token headroom, so this almost always closes the gap.
-    const missingSpecs = specs.filter((s) => !collected.has(titleKey(s.title)));
+    //
+    // Capped, because each retry costs a full batch's worth of the per-minute
+    // token quota. Uncapped, a run where several batches failed spent every
+    // refill window on retries and appeared frozen for ten minutes or more;
+    // shipping the document with a few sections flagged missing beats that.
+    const missingSpecs = quotaError
+        ? []
+        : specs.filter((s) => !collected.has(titleKey(s.title))).slice(0, MAX_SECTION_RETRIES);
     for (const spec of missingSpecs) {
         const index = specs.findIndex((s) => s.title === spec.title) + 1;
         const prompt = buildSectionBatchPrompt(
@@ -728,7 +910,7 @@ async function generateSections(
             docKind
         );
         try {
-            const raw = await callLLM(prompt, provider, apiKey, model, SINGLE_SECTION_MAX_TOKENS);
+            const raw = await callLLM(prompt, provider, apiKey, model, SINGLE_SECTION_MAX_TOKENS, ctx);
             const recovered = extractSections(raw).find(
                 (s) => titleKey(s.title) === titleKey(spec.title)
             );
@@ -737,7 +919,17 @@ async function generateSections(
             }
         } catch (err) {
             console.warn(`[generateSections] retry for "${spec.title}" failed:`, err);
+            if (isQuotaError(err)) {
+                quotaError = err as Error;
+                break;
+            }
         }
+    }
+
+    // Nothing at all came back and we know why: report the real cause rather
+    // than the generic "no usable sections" the caller would otherwise raise.
+    if (quotaError && collected.size === 0) {
+        throw quotaError;
     }
 
     const sections: PRDSection[] = [];
@@ -993,6 +1185,13 @@ export async function POST(request: NextRequest) {
                 send('prd-progress', { done, total });
             };
 
+            // A rate-limit wait is the single longest thing that happens in a
+            // run on a free key. Announcing it keeps the client showing a
+            // countdown rather than a step that looks hung.
+            const llm = newLLMContext((waitMs, reason) => {
+                send('rate-limit', { waitMs, reason, resumeAt: Date.now() + waitMs });
+            });
+
             const finish = (
                 sections: PRDSection[],
                 missing: string[],
@@ -1049,7 +1248,8 @@ export async function POST(request: NextRequest) {
                         provider,
                         apiKey,
                         model,
-                        emitProgress
+                        emitProgress,
+                        llm
                     );
 
                     if (sections.length === 0) {
@@ -1079,7 +1279,7 @@ export async function POST(request: NextRequest) {
                         });
 
                         const prompt = buildAgentPrompt(topic, agent.id, agent.role, history, round, groundingBlock);
-                        const response = await callLLM(prompt, provider, apiKey, model);
+                        const response = await callLLM(prompt, provider, apiKey, model, 800, llm);
 
                         const msg: DebateMessage = {
                             agentId: agent.id,
@@ -1105,7 +1305,7 @@ export async function POST(request: NextRequest) {
                 send('phase', { phase: 'consensus', message: 'Reaching consensus...' });
 
                 const convergencePrompt = buildConvergencePrompt(topic, history);
-                const convergenceResponse = await callLLM(convergencePrompt, provider, apiKey, model, 600);
+                const convergenceResponse = await callLLM(convergencePrompt, provider, apiKey, model, 600, llm);
 
                 const convergenceMsg: DebateMessage = {
                     agentId: 'pm',
@@ -1153,7 +1353,8 @@ The sections you write MUST be directly synthesized from the agent consensus abo
                     provider,
                     apiKey,
                     model,
-                    emitProgress
+                    emitProgress,
+                    llm
                 );
 
                 if (sections.length === 0) {

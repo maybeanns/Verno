@@ -1,44 +1,30 @@
 'use client';
 
-import { Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
-import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
+import { Suspense, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-function WorkspaceContent() {
-    const params = useSearchParams();
+import WorkspaceLoading from '@/components/workspace/WorkspaceLoading';
+import { legacyWorkspacePath } from '@/lib/workspace-url';
 
-    const query = params.get('q') ?? '';
-    const projectType = params.get('type') ?? 'Full Stack App';
-    const mode = params.get('mode') ?? 'Generate PRD';
-    const jobId = params.get('jobId') ?? undefined;
-    const model = params.get('model') ?? undefined;
-    const visibility = params.get('visibility') ?? 'public';
-    const fastTrack = params.get('fastTrack') === 'true';
+/**
+ * Links shared before the slug routes existed still arrive here as
+ * `/workspace?q=…`. Upgrade them in place rather than breaking them.
+ */
+function LegacyWorkspaceRedirect() {
+    const router = useRouter();
+    const search = useSearchParams();
 
-    return (
-        <WorkspaceLayout
-            query={query}
-            projectType={projectType}
-            mode={mode}
-            jobId={jobId}
-            model={model}
-            visibility={visibility}
-            fastTrack={fastTrack}
-        />
-    );
+    useEffect(() => {
+        router.replace(legacyWorkspacePath(search) ?? '/');
+    }, [router, search]);
+
+    return <WorkspaceLoading />;
 }
 
 export default function WorkspacePage() {
     return (
-        <Suspense fallback={
-            <div className="h-screen flex items-center justify-center bg-background">
-                <div className="flex flex-col items-center gap-4">
-                    <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                    <p className="text-sm text-muted-foreground">Loading workspace…</p>
-                </div>
-            </div>
-        }>
-            <WorkspaceContent />
+        <Suspense fallback={<WorkspaceLoading />}>
+            <LegacyWorkspaceRedirect />
         </Suspense>
     );
 }
