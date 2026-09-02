@@ -29,14 +29,33 @@ interface WorkspaceChatProps {
     fastTrack?: boolean;
 }
 
-const THINKING_STEPS: Omit<ThinkingStep, 'status'>[] = [
-    { id: 'guard', label: 'Scanning input for safety' },
-    { id: 'debate', label: 'Multi-agent debate (2 rounds, 8 agents)' },
-    { id: 'consensus', label: 'PM convergence — reaching consensus' },
-    { id: 'prd-gen', label: 'Generating PRD document' },
-    { id: 'security-pass', label: 'Security & compliance checks' },
-    { id: 'complete', label: 'Finalizing output' },
-];
+/** The label for the document-generation step, which differs by mode. */
+function docStepLabel(mode: string): string {
+    return mode === 'Plan' ? 'Generating Architectural & Sprint Plan' : 'Generating PRD document';
+}
+
+/**
+ * The steps this run will actually perform.
+ *
+ * This was a fixed six-entry list, and three of those entries were fiction.
+ * There is no safety scan anywhere in the pipeline, and Fast Track — every mode
+ * except SDLC — goes straight to section generation without a debate or a
+ * convergence round. The route emits `prd-gen` as its first phase, which the
+ * client read as "everything before this finished", so three steps were ticked
+ * off green in milliseconds having never run.
+ */
+function stepsFor(mode: string, fastTrack: boolean): Omit<ThinkingStep, 'status'>[] {
+    const debateSteps = [
+        { id: 'debate', label: 'Multi-agent debate (2 rounds, 8 agents)' },
+        { id: 'consensus', label: 'PM convergence — reaching consensus' },
+    ];
+    return [
+        ...(fastTrack ? [] : debateSteps),
+        { id: 'prd-gen', label: docStepLabel(mode) },
+        { id: 'security-pass', label: 'Security & compliance checks' },
+        { id: 'complete', label: 'Finalizing output' },
+    ];
+}
 
 function detectProvider(): { provider: string; apiKey: string; model?: string } | null {
     const s = loadSettings();
@@ -64,12 +83,7 @@ export default function WorkspaceChat({ query, projectType, mode, model, agents,
     const [input, setInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [steps, setSteps] = useState<ThinkingStep[]>(() =>
-        THINKING_STEPS.map(s => {
-            if (s.id === 'prd-gen' && mode === 'Plan') {
-                return { ...s, label: 'Generating Architectural & Sprint Plan', status: 'pending' as const };
-            }
-            return { ...s, status: 'pending' as const };
-        })
+        stepsFor(mode, Boolean(fastTrack)).map(s => ({ ...s, status: 'pending' as const }))
     );
     const [thinkingDone, setThinkingDone] = useState(false);
     const [showMentions, setShowMentions] = useState(false);
@@ -211,18 +225,30 @@ export default function WorkspaceChat({ query, projectType, mode, model, agents,
             if (!reader) throw new Error('No response stream');
             const decoder = new TextDecoder();
             let buffer = '';
-            setSteps(prev => prev.map((s, i) => ({ ...s, status: i === 0 ? 'done' : i === 1 ? 'active' : 'pending' })));
+            // Declared outside the read loop on purpose. An SSE event is an
+            // "event:" line followed by a "data:" line, and a network chunk
+            // boundary lands between the two routinely — the closing
+            // prd-complete carries the whole document, so it spans several
+            // chunks every time. Resetting the name once per chunk dropped that
+            // event silently: the finished PRD never reached the viewer and the
+            // last step span forever.
+            let currentEvent = '';
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
-                let currentEvent = '';
-                for (const line of lines) {
-                    if (line.startsWith('event: ')) { currentEvent = line.slice(7).trim(); }
-                    else if (line.startsWith('data: ') && currentEvent) {
-                        try { handleSSEEvent(currentEvent, JSON.parse(line.slice(6))); } catch { }
+                for (const rawLine of lines) {
+                    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+                    if (line.startsWith('event: ')) {
+                        currentEvent = line.slice(7).trim();
+                    } else if (line.startsWith('data: ') && currentEvent) {
+                        try {
+                            handleSSEEvent(currentEvent, JSON.parse(line.slice(6)));
+                        } catch (parseErr) {
+                            console.warn(`[debate] dropped malformed "${currentEvent}" event`, parseErr);
+                        }
                         currentEvent = '';
                     }
                 }
@@ -239,9 +265,17 @@ export default function WorkspaceChat({ query, projectType, mode, model, agents,
     function handleSSEEvent(event: string, data: any) {
         switch (event) {
             case 'phase': {
-                const stepMap: Record<string, number> = { debate: 1, consensus: 2, 'prd-gen': 3, 'security-pass': 4, complete: 5 };
-                const idx = stepMap[data.phase];
-                if (idx !== undefined) setSteps(prev => prev.map((s, i) => ({ ...s, status: i < idx ? 'done' : i === idx ? 'active' : 'pending' })));
+                // Resolved against the live step list, so a phase this run does
+                // not perform simply has no step to mark, rather than marking
+                // whatever happens to sit at a fixed index.
+                setSteps(prev => {
+                    const idx = prev.findIndex(s => s.id === data.phase);
+                    if (idx === -1) return prev;
+                    return prev.map((s, i) => ({
+                        ...s,
+                        status: i < idx ? 'done' : i === idx ? 'active' : 'pending',
+                    }));
+                });
                 break;
             }
             case 'round':
@@ -258,7 +292,7 @@ export default function WorkspaceChat({ query, projectType, mode, model, agents,
                 setRateLimitUntil(null);
                 // The document is generated section-batch by section-batch; keep
                 // the step label live so a long PRD phase never looks stalled.
-                const base = mode === 'Plan' ? 'Generating Architectural & Sprint Plan' : 'Generating PRD document';
+                const base = docStepLabel(mode);
                 setSteps(prev => prev.map(s => s.id === 'prd-gen'
                     ? { ...s, label: `${base} (${data.done}/${data.total} sections)` }
                     : s));
@@ -420,9 +454,12 @@ export default function WorkspaceChat({ query, projectType, mode, model, agents,
                             <p className="text-[13px] text-red-400/80 pl-7">{errorMsg}</p>
                         ) : (
                             <p className="text-[13px] text-[#DD830A]/80 pl-7">
+                                {/* Only SDLC runs the debate, so only SDLC may claim it. */}
                                 {mode === 'Plan'
                                     ? "I'll generate a comprehensive architectural design and sprint plan. Let me plan and execute this."
-                                    : "I'll generate a professional PRD using our 8-agent debate system. Let me plan and execute this."}
+                                    : fastTrack
+                                        ? "I'll generate a professional PRD section by section. Let me plan and execute this."
+                                        : "I'll generate a professional PRD using our 8-agent debate system. Let me plan and execute this."}
                             </p>
                         )}
 

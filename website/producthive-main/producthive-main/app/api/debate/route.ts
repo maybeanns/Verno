@@ -427,6 +427,22 @@ function parseDuration(value: string | null): number | null {
     return total;
 }
 
+/** Renders a duration for a human: "13m 12s", "45s". Providers quote raw floats. */
+function formatDuration(ms: number | null): string | null {
+    if (ms === null || !Number.isFinite(ms) || ms <= 0) {
+        return null;
+    }
+    const totalSeconds = Math.ceil(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const parts: string[] = [];
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (seconds > 0 && hours === 0) parts.push(`${seconds}s`);
+    return parts.join(' ') || `${totalSeconds}s`;
+}
+
 /**
  * How long to wait after a 429, preferring the server's own guidance.
  *
@@ -615,8 +631,9 @@ async function callLLM(
         // Matches the duration grammar itself so the sentence's full stop is not
         // swallowed into the quoted time ("7m39.648s." → "7m39.648s").
         const stated = detail.match(/Please try again in ((?:\d+(?:\.\d+)?(?:ms|[smhd]))+)/i);
+        const retryIn = stated ? formatDuration(parseDuration(stated[1])) : null;
         throw new Error(
-            `${provider} rate limit reached for "${model}"${stated ? ` (retry in ${stated[1]})` : ''}. ${advice}`
+            `${provider} rate limit reached for "${model}"${retryIn ? ` (retry in ${retryIn})` : ''}. ${advice}`
         );
     }
 
@@ -849,7 +866,7 @@ async function generateSections(
     model: string | undefined,
     onProgress: (done: number, total: number) => void,
     ctx?: LLMContext
-): Promise<{ sections: PRDSection[]; missing: string[] }> {
+): Promise<{ sections: PRDSection[]; missing: string[]; stopReason?: string }> {
     const collected = new Map<string, PRDSection>();
     // Set once the provider says the quota is gone for good. Every further call
     // would fail the same way, so we stop instead of grinding through the rest
@@ -945,7 +962,7 @@ async function generateSections(
         }
     }
 
-    return { sections, missing };
+    return { sections, missing, ...(quotaError ? { stopReason: quotaError.message } : {}) };
 }
 
 // ─── Security & Compliance pass (mirrors SecurityComplianceService) ──────────
@@ -1196,7 +1213,8 @@ export async function POST(request: NextRequest) {
                 sections: PRDSection[],
                 missing: string[],
                 history: DebateMessage[],
-                roundCount: number
+                roundCount: number,
+                stopReason?: string
             ) => {
                 send('phase', { phase: 'security-pass', message: 'Running security & compliance checks...' });
                 const withFlags = applySecurityPass(sections);
@@ -1206,9 +1224,16 @@ export async function POST(request: NextRequest) {
                 const markdown = formatPRDMarkdown(docTitle, withFlags);
 
                 if (missing.length > 0) {
+                    // "could not be generated" on its own reads like the model
+                    // failed. When the run stopped because the quota ran out,
+                    // that is the fact the user needs in order to act.
+                    const cause = stopReason
+                        ? ` Generation stopped early: ${stopReason}`
+                        : '';
                     send('warning', {
-                        message: `${missing.length} section${missing.length === 1 ? '' : 's'} could not be generated: ${missing.join(', ')}.`,
+                        message: `${missing.length} section${missing.length === 1 ? '' : 's'} could not be generated: ${missing.join(', ')}.${cause}`,
                         missing,
+                        stopReason,
                     });
                 }
 
@@ -1239,7 +1264,7 @@ export async function POST(request: NextRequest) {
                             : 'Fast Track: Generating PRD...',
                     });
 
-                    const { sections, missing } = await generateSections(
+                    const { sections, missing, stopReason } = await generateSections(
                         specs,
                         topic,
                         resolvedProjectType,
@@ -1258,7 +1283,7 @@ export async function POST(request: NextRequest) {
                         );
                     }
 
-                    finish(sections, missing, [], 1);
+                    finish(sections, missing, [], 1, stopReason);
                     return;
                 }
 
@@ -1344,7 +1369,7 @@ CRITICAL CONSENSUS RULE:
 The sections you write MUST be directly synthesized from the agent consensus above. Do NOT use generic placeholder templates. Every technical stack decision, pricing tier, feature list, and threat mitigation MUST match what the agents debated and agreed upon. Do not invent details that contradict the debate.
 `;
 
-                const { sections, missing } = await generateSections(
+                const { sections, missing, stopReason } = await generateSections(
                     specs,
                     topic,
                     resolvedProjectType,
@@ -1369,12 +1394,13 @@ The sections you write MUST be directly synthesized from the agent consensus abo
                         [{ title: 'OVERVIEW AND SYNTHESIS', content: convergenceResponse }],
                         missing,
                         history,
-                        numRounds
+                        numRounds,
+                        stopReason
                     );
                     return;
                 }
 
-                finish(sections, missing, history, numRounds);
+                finish(sections, missing, history, numRounds, stopReason);
             } catch (err: any) {
                 send('error', { message: err.message || 'Unknown error during debate' });
             } finally {
