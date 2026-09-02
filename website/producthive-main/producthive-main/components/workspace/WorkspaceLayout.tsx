@@ -4,8 +4,9 @@ import { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Hexagon, Eye, Code2, Terminal, Share2, Sparkles } from 'lucide-react';
 import Link from 'next/link';
-import WorkspaceChat from './WorkspaceChat';
+import WorkspaceChat, { type AgentTranscriptMessage } from './WorkspaceChat';
 import PRDViewer from './PRDViewer';
+import AgentTranscript from './AgentTranscript';
 import DevWorkspaceLayout from './DevWorkspaceLayout';
 
 // ── 8 BMAD agents (identical to extension's DebateOrchestrator) ──────────────
@@ -57,6 +58,7 @@ export default function WorkspaceLayout({
     const [prdTitle, setPrdTitle] = useState<string>('');
     const [isGenerating, setIsGenerating] = useState(true);
     const [activeTab, setActiveTab] = useState<'preview' | 'code' | 'console'>('preview');
+    const [agentMessages, setAgentMessages] = useState<AgentTranscriptMessage[]>([]);
 
     const agents = DEBATE_AGENTS;
 
@@ -64,6 +66,11 @@ export default function WorkspaceLayout({
         setPrdTitle(title);
         setPrdContent(content);
         setIsGenerating(false);
+    }, []);
+
+    // Stable identity: WorkspaceChat calls this from an effect keyed on it.
+    const handleAgentMessages = useCallback((messages: AgentTranscriptMessage[]) => {
+        setAgentMessages(messages);
     }, []);
 
     return (
@@ -138,6 +145,7 @@ export default function WorkspaceLayout({
                         model={model}
                         agents={agents}
                         onPRDReady={handlePRDReady}
+                        onAgentMessages={handleAgentMessages}
                         fastTrack={fastTrack}
                     />
                 </motion.div>
@@ -149,12 +157,21 @@ export default function WorkspaceLayout({
                     transition={{ duration: 0.3, delay: 0.1 }}
                     className="flex-1 flex flex-col bg-[#15151A]"
                 >
-                    <PRDViewer
-                        title={prdTitle}
-                        content={prdContent}
-                        isGenerating={isGenerating}
-                        projectType={projectType}
-                    />
+                    {activeTab === 'console' ? (
+                        <AgentTranscript
+                            messages={agentMessages}
+                            fastTrack={fastTrack}
+                            isGenerating={isGenerating}
+                        />
+                    ) : (
+                        <PRDViewer
+                            title={prdTitle}
+                            content={prdContent}
+                            isGenerating={isGenerating}
+                            projectType={projectType}
+                            view={activeTab === 'code' ? 'markdown' : 'preview'}
+                        />
+                    )}
                 </motion.div>
             </div>
         </div>

@@ -22,10 +22,22 @@ interface Message {
     timestamp: Date;
 }
 interface ThinkingStep { id: string; label: string; status: 'pending' | 'active' | 'done' | 'error'; }
+/** One agent turn, lifted out so the Agents tab can render the debate. */
+export interface AgentTranscriptMessage {
+    id: string;
+    agentName: string;
+    agentColor: string;
+    content: string;
+    round?: number;
+    debateType?: 'argument' | 'counter' | 'consensus';
+}
+
 interface WorkspaceChatProps {
     query: string; projectType: string; mode: string;
     jobId?: string; model?: string; agents: AgentInfo[];
     onPRDReady: (title: string, content: string) => void;
+    /** Receives the debate as it arrives. Must be stable (useCallback). */
+    onAgentMessages?: (messages: AgentTranscriptMessage[]) => void;
     fastTrack?: boolean;
 }
 
@@ -78,7 +90,7 @@ function detectProvider(): { provider: string; apiKey: string; model?: string } 
     return { provider: 'test', apiKey: 'shared', model: DEFAULT_GROQ_MODEL };
 }
 
-export default function WorkspaceChat({ query, projectType, mode, model, agents, onPRDReady, fastTrack }: WorkspaceChatProps) {
+export default function WorkspaceChat({ query, projectType, mode, model, agents, onPRDReady, onAgentMessages, fastTrack }: WorkspaceChatProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -130,6 +142,24 @@ export default function WorkspaceChat({ query, projectType, mode, model, agents,
     }, [thinkingDone, messages, runIdentity]);
 
     useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, steps]);
+
+    // Publish the debate upward so the Agents tab can show it live. Chat keeps
+    // ownership of the messages; this is a read-only projection of them.
+    useEffect(() => {
+        if (!onAgentMessages) return;
+        onAgentMessages(
+            messages
+                .filter(m => m.role === 'agent')
+                .map(m => ({
+                    id: m.id,
+                    agentName: m.agentName ?? 'Agent',
+                    agentColor: m.agentColor ?? '#6366F1',
+                    content: m.content,
+                    round: m.round,
+                    debateType: m.debateType,
+                }))
+        );
+    }, [messages, onAgentMessages]);
 
     // Free provider tiers cap tokens per minute, so a long run spends real time
     // waiting for the quota to refill. Counting it down is the difference
