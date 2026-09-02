@@ -27,6 +27,13 @@ import {
     titleKey,
     type PRDSection,
 } from '@/lib/prd/sections';
+import {
+    MAX_DEBATE_ROUNDS,
+    ROUND_SKIP_THRESHOLD,
+    roundReachedThreshold,
+    scoreRound,
+    topicComplexity,
+} from '@/lib/prd/debate-signal';
 
 // ─── Document section catalog ───────────────────────────────────────────────
 // Single source of truth for both the Fast Track and the full-debate path, so
@@ -427,6 +434,23 @@ function parseDuration(value: string | null): number | null {
     return total;
 }
 
+/**
+ * A rate limit the caller cannot wait out inside this request.
+ *
+ * Not exported: a Next.js route module may only export its handlers, and the
+ * client learns the scope from the `code` on the SSE event rather than the type.
+ *
+ * `scope` matters to the user: a per-minute cap clears on its own, a daily one
+ * means come back tomorrow. The client renders a different message for each,
+ * so the distinction has to survive as data rather than prose.
+ */
+class QuotaError extends Error {
+    constructor(message: string, readonly scope: 'day' | 'minute') {
+        super(message);
+        this.name = 'QuotaError';
+    }
+}
+
 /** Renders a duration for a human: "13m 12s", "45s". Providers quote raw floats. */
 function formatDuration(ms: number | null): string | null {
     if (ms === null || !Number.isFinite(ms) || ms <= 0) {
@@ -632,8 +656,9 @@ async function callLLM(
         // swallowed into the quoted time ("7m39.648s." → "7m39.648s").
         const stated = detail.match(/Please try again in ((?:\d+(?:\.\d+)?(?:ms|[smhd]))+)/i);
         const retryIn = stated ? formatDuration(parseDuration(stated[1])) : null;
-        throw new Error(
-            `${provider} rate limit reached for "${model}"${retryIn ? ` (retry in ${retryIn})` : ''}. ${advice}`
+        throw new QuotaError(
+            `${provider} rate limit reached for "${model}"${retryIn ? ` (retry in ${retryIn})` : ''}. ${advice}`,
+            perDay ? 'day' : 'minute'
         );
     }
 
@@ -764,8 +789,8 @@ const SINGLE_SECTION_MAX_TOKENS = BATCH_MAX_TOKENS;
 const MAX_SECTION_RETRIES = 6;
 
 /** True for a failure that further calls cannot recover from (quota exhausted). */
-function isQuotaError(err: unknown): boolean {
-    return err instanceof Error && /rate limit reached/i.test(err.message);
+function isQuotaError(err: unknown): err is QuotaError {
+    return err instanceof QuotaError;
 }
 
 function buildSectionBatchPrompt(
@@ -866,12 +891,12 @@ async function generateSections(
     model: string | undefined,
     onProgress: (done: number, total: number) => void,
     ctx?: LLMContext
-): Promise<{ sections: PRDSection[]; missing: string[]; stopReason?: string }> {
+): Promise<{ sections: PRDSection[]; missing: string[]; stopReason?: string; stopScope?: 'day' | 'minute' }> {
     const collected = new Map<string, PRDSection>();
     // Set once the provider says the quota is gone for good. Every further call
     // would fail the same way, so we stop instead of grinding through the rest
     // of the document and returning a mostly empty one.
-    let quotaError: Error | null = null;
+    let quotaError: QuotaError | null = null;
 
     for (let i = 0; i < specs.length && !quotaError; i += SECTION_BATCH_SIZE) {
         const batch = specs.slice(i, i + SECTION_BATCH_SIZE);
@@ -897,7 +922,7 @@ async function generateSections(
         } catch (err) {
             console.warn(`[generateSections] batch starting at section ${i + 1} failed:`, err);
             if (isQuotaError(err)) {
-                quotaError = err as Error;
+                quotaError = err;
             }
         }
 
@@ -937,7 +962,7 @@ async function generateSections(
         } catch (err) {
             console.warn(`[generateSections] retry for "${spec.title}" failed:`, err);
             if (isQuotaError(err)) {
-                quotaError = err as Error;
+                quotaError = err;
                 break;
             }
         }
@@ -962,7 +987,11 @@ async function generateSections(
         }
     }
 
-    return { sections, missing, ...(quotaError ? { stopReason: quotaError.message } : {}) };
+    return {
+        sections,
+        missing,
+        ...(quotaError ? { stopReason: quotaError.message, stopScope: quotaError.scope } : {}),
+    };
 }
 
 // ─── Security & Compliance pass (mirrors SecurityComplianceService) ──────────
@@ -1214,7 +1243,8 @@ export async function POST(request: NextRequest) {
                 missing: string[],
                 history: DebateMessage[],
                 roundCount: number,
-                stopReason?: string
+                stopReason?: string,
+                stopScope?: 'day' | 'minute'
             ) => {
                 send('phase', { phase: 'security-pass', message: 'Running security & compliance checks...' });
                 const withFlags = applySecurityPass(sections);
@@ -1231,9 +1261,16 @@ export async function POST(request: NextRequest) {
                         ? ` Generation stopped early: ${stopReason}`
                         : '';
                     send('warning', {
+                        // Tagged so the chat can drop it: the full section list
+                        // plus a provider error string is a wall of text, and the
+                        // completion message already reports the incomplete count.
+                        // The detail stays on the event for the console and for
+                        // anything that wants it.
+                        kind: 'missing-sections',
                         message: `${missing.length} section${missing.length === 1 ? '' : 's'} could not be generated: ${missing.join(', ')}.${cause}`,
                         missing,
                         stopReason,
+                        code: stopScope === 'day' ? 'daily-quota' : undefined,
                     });
                 }
 
@@ -1264,7 +1301,7 @@ export async function POST(request: NextRequest) {
                             : 'Fast Track: Generating PRD...',
                     });
 
-                    const { sections, missing, stopReason } = await generateSections(
+                    const { sections, missing, stopReason, stopScope } = await generateSections(
                         specs,
                         topic,
                         resolvedProjectType,
@@ -1283,18 +1320,35 @@ export async function POST(request: NextRequest) {
                         );
                     }
 
-                    finish(sections, missing, [], 1, stopReason);
+                    finish(sections, missing, [], 1, stopReason, stopScope);
                     return;
                 }
 
                 const history: DebateMessage[] = [];
-                const numRounds = 2;
 
                 // ── Phase A: multi-agent debate ───────────────────────────
-                send('phase', { phase: 'debate', message: 'Starting optimized 8-agent debate (2 rounds)...' });
+                // A second round is eight more calls. It is worth that only when
+                // the topic has contested surface and round one left something
+                // unresolved, so the count is decided from the brief and then
+                // re-checked against what the agents actually produced.
+                const complexity = topicComplexity(topic);
+                let plannedRounds = complexity.simple ? 1 : MAX_DEBATE_ROUNDS;
+                let roundsRun = 0;
 
-                for (let round = 1; round <= numRounds; round++) {
-                    send('round', { round, total: numRounds });
+                send('debate-plan', {
+                    plannedRounds,
+                    simple: complexity.simple,
+                    reason: complexity.reason,
+                    agentCount: DEBATE_AGENTS.length,
+                });
+                send('phase', {
+                    phase: 'debate',
+                    message: `Starting 8-agent debate (${plannedRounds} round${plannedRounds === 1 ? '' : 's'})...`,
+                });
+
+                for (let round = 1; round <= plannedRounds; round++) {
+                    send('round', { round, total: plannedRounds });
+                    const roundMessages: DebateMessage[] = [];
 
                     for (const agent of DEBATE_AGENTS) {
                         send('agent-thinking', {
@@ -1314,6 +1368,7 @@ export async function POST(request: NextRequest) {
                             type: round === 1 ? 'argument' : 'counter',
                         };
                         history.push(msg);
+                        roundMessages.push(msg);
 
                         send('agent-response', {
                             agentId: agent.id,
@@ -1323,6 +1378,36 @@ export async function POST(request: NextRequest) {
                             round,
                             type: msg.type,
                         });
+                    }
+
+                    roundsRun = round;
+
+                    // Every agent already specific, substantial and non-redundant
+                    // means the rebuttal round would mostly restate round one.
+                    if (round < plannedRounds) {
+                        const scores = scoreRound(
+                            roundMessages.map((m) => ({ agentId: m.agentId, content: m.content }))
+                        );
+                        const settled = roundReachedThreshold(scores);
+                        send('debate-scores', {
+                            round,
+                            threshold: ROUND_SKIP_THRESHOLD,
+                            settled,
+                            scores: scores.map((sc) => ({
+                                agentId: sc.agentId,
+                                agentName: AGENT_DISPLAY_NAMES[sc.agentId],
+                                score: Number(sc.score.toFixed(2)),
+                            })),
+                        });
+                        if (settled) {
+                            const weakest = Math.min(...scores.map((sc) => sc.score));
+                            send('round-skipped', {
+                                skippedFrom: round + 1,
+                                message: `All ${scores.length} agents cleared the debate threshold (lowest ${weakest.toFixed(2)} vs ${ROUND_SKIP_THRESHOLD}). Skipping round ${round + 1}.`,
+                            });
+                            plannedRounds = round;
+                            break;
+                        }
                     }
                 }
 
@@ -1335,7 +1420,7 @@ export async function POST(request: NextRequest) {
                 const convergenceMsg: DebateMessage = {
                     agentId: 'pm',
                     content: convergenceResponse,
-                    round: numRounds + 1,
+                    round: roundsRun + 1,
                     timestamp: Date.now(),
                     type: 'consensus',
                 };
@@ -1346,7 +1431,7 @@ export async function POST(request: NextRequest) {
                     agentName: 'Product Manager',
                     agentColor: AGENT_COLORS['pm'],
                     content: convergenceResponse,
-                    round: numRounds + 1,
+                    round: roundsRun + 1,
                     type: 'consensus',
                 });
 
@@ -1369,7 +1454,7 @@ CRITICAL CONSENSUS RULE:
 The sections you write MUST be directly synthesized from the agent consensus above. Do NOT use generic placeholder templates. Every technical stack decision, pricing tier, feature list, and threat mitigation MUST match what the agents debated and agreed upon. Do not invent details that contradict the debate.
 `;
 
-                const { sections, missing, stopReason } = await generateSections(
+                const { sections, missing, stopReason, stopScope } = await generateSections(
                     specs,
                     topic,
                     resolvedProjectType,
@@ -1394,15 +1479,21 @@ The sections you write MUST be directly synthesized from the agent consensus abo
                         [{ title: 'OVERVIEW AND SYNTHESIS', content: convergenceResponse }],
                         missing,
                         history,
-                        numRounds,
-                        stopReason
+                        roundsRun,
+                        stopReason,
+                        stopScope
                     );
                     return;
                 }
 
-                finish(sections, missing, history, numRounds, stopReason);
+                finish(sections, missing, history, roundsRun, stopReason, stopScope);
             } catch (err: any) {
-                send('error', { message: err.message || 'Unknown error during debate' });
+                send('error', {
+                    message: err?.message || 'Unknown error during debate',
+                    // Lets the client show "come back tomorrow" rather than a
+                    // provider error string the user cannot act on.
+                    code: isQuotaError(err) && err.scope === 'day' ? 'daily-quota' : undefined,
+                });
             } finally {
                 controller.close();
             }

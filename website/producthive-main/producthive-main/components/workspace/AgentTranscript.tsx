@@ -17,6 +17,18 @@ const TYPE_LABEL: Record<string, string> = {
     consensus: 'Consensus',
 };
 
+/**
+ * The PM's convergence arrives as its own round after the debate rounds, so
+ * numbering it "Round 3" alongside the two real rounds misreads what happened.
+ */
+function roundLabel(round: number, messages: AgentTranscriptMessage[]): string {
+    const inRound = messages.filter(m => (m.round ?? 0) === round);
+    if (inRound.length > 0 && inRound.every(m => m.debateType === 'consensus')) {
+        return 'PM Convergence';
+    }
+    return round === 0 ? 'Debate' : `Round ${round}`;
+}
+
 export default function AgentTranscript({ messages, fastTrack, isGenerating }: AgentTranscriptProps) {
     if (messages.length === 0) {
         return (
@@ -58,7 +70,7 @@ export default function AgentTranscript({ messages, fastTrack, isGenerating }: A
                         <div key={round} className="space-y-3">
                             <div className="flex items-center gap-2.5 pt-2">
                                 <span className="text-[11px] font-medium text-white/40">
-                                    {round === 0 ? 'Debate' : `Round ${round}`}
+                                    {roundLabel(round, messages)}
                                 </span>
                                 <div className="flex-1 h-px bg-white/[0.06]" />
                             </div>

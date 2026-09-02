@@ -114,7 +114,13 @@ export default function MainInput() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [selectedType, setSelectedType] = useState<ProjectType>('Full Stack App');
     const [operationalMode, setOperationalMode] = useState<OperationalMode>('SDLC');
-    const fastTrack = operationalMode !== 'SDLC';
+    // The debate is the product. A PRD is meant to be argued out by the eight
+    // agents and then converged by the PM, not written straight through — so
+    // Generate PRD runs the full debate, same as SDLC. Only Plan mode skips it:
+    // its sections are architecture and sprint breakdowns for a product whose
+    // requirements are already settled, so a requirements debate would add cost
+    // without adding content.
+    const fastTrack = operationalMode === 'Plan';
     const [showModes, setShowModes] = useState(false);
     const [showAuth, setShowAuth] = useState(false);
     const [authReason, setAuthReason] = useState<string | null>(null);

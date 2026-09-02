@@ -41,6 +41,13 @@ interface WorkspaceChatProps {
     fastTrack?: boolean;
 }
 
+/**
+ * Shown when the provider's daily token budget is gone. Deliberately not the
+ * provider's own wording: "rate limit reached on tokens per day (TPD)" tells the
+ * user nothing they can act on, and waiting will not help until tomorrow.
+ */
+const DAILY_QUOTA_MESSAGE = 'Max generations reached for today. Try again tomorrow.';
+
 /** The label for the document-generation step, which differs by mode. */
 function docStepLabel(mode: string): string {
     return mode === 'Plan' ? 'Generating Architectural & Sprint Plan' : 'Generating PRD document';
@@ -58,7 +65,9 @@ function docStepLabel(mode: string): string {
  */
 function stepsFor(mode: string, fastTrack: boolean): Omit<ThinkingStep, 'status'>[] {
     const debateSteps = [
-        { id: 'debate', label: 'Multi-agent debate (2 rounds, 8 agents)' },
+        // Round count is decided per run from the brief, then re-checked against
+        // what the agents produced, so the label is filled in by `debate-plan`.
+        { id: 'debate', label: 'Multi-agent debate (8 agents)' },
         { id: 'consensus', label: 'PM convergence — reaching consensus' },
     ];
     return [
@@ -334,7 +343,25 @@ export default function WorkspaceChat({ query, projectType, mode, model, agents,
                 setRateLimitUntil(data.resumeAt ?? Date.now() + (data.waitMs ?? 0));
                 break;
             case 'warning':
-                setMessages(prev => [...prev, { id: 'warn-' + Date.now(), role: 'system', content: `⚠️ ${data.message}`, timestamp: new Date() }]);
+                // The missing-sections warning enumerates every failed section and
+                // appends the raw provider error — a wall of text in a narrow
+                // panel, and redundant: the completion message already gives the
+                // incomplete count, and a daily quota gets its own line below.
+                if (data.kind === 'missing-sections') {
+                    console.warn('[debate]', data.message);
+                } else {
+                    setMessages(prev => [...prev, { id: 'warn-' + Date.now(), role: 'system', content: `⚠️ ${data.message}`, timestamp: new Date() }]);
+                }
+                // The document still rendered, but it is short because the day's
+                // budget ran out. This goes in as its own message rather than
+                // via setErrorMsg, which lives in the steps block and unmounts
+                // the moment the run completes.
+                if (data.code === 'daily-quota') {
+                    setMessages(prev => [...prev, {
+                        id: 'quota-' + Date.now(), role: 'system',
+                        content: `🚫 ${DAILY_QUOTA_MESSAGE}`, timestamp: new Date(),
+                    }]);
+                }
                 break;
             case 'prd-complete':
                 setRateLimitUntil(null);
@@ -344,11 +371,36 @@ export default function WorkspaceChat({ query, projectType, mode, model, agents,
                 setSteps(prev => prev.map(s => ({ ...s, status: 'done' as const })));
                 setMessages(prev => [...prev, { id: 'prd-done', role: 'system', content: `✅ PRD generated! ${data.sections?.length ?? 0} sections${data.missingSections?.length ? ` (${data.missingSections.length} incomplete)` : ''}. View it in the right panel.`, timestamp: new Date() }]);
                 break;
-            case 'error':
-                setErrorMsg(parseErrorMessage(data.message));
-                setSteps(prev => prev.map(s => s.status === 'active' ? { ...s, status: 'error' as const } : s));
-                setMessages(prev => [...prev, { id: 'err-' + Date.now(), role: 'system', content: `❌ ${parseErrorMessage(data.message)}`, timestamp: new Date() }]);
+            case 'debate-plan': {
+                setSteps(prev => prev.map(s => s.id === 'debate'
+                    ? { ...s, label: `Multi-agent debate (${data.plannedRounds} round${data.plannedRounds === 1 ? '' : 's'}, ${data.agentCount} agents)` }
+                    : s));
+                if (data.simple) {
+                    setMessages(prev => [...prev, {
+                        id: 'plan-' + Date.now(), role: 'system',
+                        content: `⚡ ${data.reason}`, timestamp: new Date(),
+                    }]);
+                }
                 break;
+            }
+            case 'round-skipped':
+                setSteps(prev => prev.map(s => s.id === 'debate'
+                    ? { ...s, label: s.label.replace(/\(\d+ rounds?/, `(${data.skippedFrom - 1} round${data.skippedFrom - 1 === 1 ? '' : 's'}`) }
+                    : s));
+                setMessages(prev => [...prev, {
+                    id: 'skip-' + Date.now(), role: 'system',
+                    content: `✅ ${data.message}`, timestamp: new Date(),
+                }]);
+                break;
+            case 'error': {
+                const friendly = data.code === 'daily-quota'
+                    ? DAILY_QUOTA_MESSAGE
+                    : parseErrorMessage(data.message);
+                setErrorMsg(friendly);
+                setSteps(prev => prev.map(s => s.status === 'active' ? { ...s, status: 'error' as const } : s));
+                setMessages(prev => [...prev, { id: 'err-' + Date.now(), role: 'system', content: `❌ ${friendly}`, timestamp: new Date() }]);
+                break;
+            }
         }
     }
 
