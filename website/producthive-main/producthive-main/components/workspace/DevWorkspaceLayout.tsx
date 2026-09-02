@@ -22,7 +22,6 @@ interface DevWorkspaceLayoutProps {
 
 function detectProvider(): { provider: string; apiKey: string; model?: string } | null {
     const s = loadSettings();
-    if (!s.preferredModel) return null;
     if (s.preferredModel === 'test') return { provider: 'test', apiKey: 'test', model: DEFAULT_GROQ_MODEL };
     if (s.preferredModel === 'Groq' && s.groqKey) return { provider: 'Groq', apiKey: s.groqKey, model: s.groqModel || DEFAULT_GROQ_MODEL };
     if (s.preferredModel === 'OpenAI' && s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
@@ -35,7 +34,10 @@ function detectProvider(): { provider: string; apiKey: string; model?: string } 
     if (s.groqKey) return { provider: 'Meta', apiKey: s.groqKey };
     if (s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
     if (s.anthropicKey) return { provider: 'Anthropic', apiKey: s.anthropicKey };
-    return null;
+    // No key of their own: fall back to the server's shared GROQ_API_KEY. Whether
+    // this caller may actually spend it (signed in, free-tier mode, within quota)
+    // is decided by the route's entitlement guard, never here.
+    return { provider: 'test', apiKey: 'shared', model: DEFAULT_GROQ_MODEL };
 }
 
 // ── Main Layout ──────────────────────────────────────────────────────────────

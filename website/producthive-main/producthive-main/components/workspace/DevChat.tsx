@@ -51,7 +51,6 @@ const CODEGEN_STEPS: Omit<ThinkingStep, 'status'>[] = [
 
 function detectProvider(): { provider: string; apiKey: string; model?: string } | null {
     const s = loadSettings();
-    if (!s.preferredModel) return null;
     if (s.preferredModel === 'test') return { provider: 'test', apiKey: 'test', model: DEFAULT_GROQ_MODEL };
     if (s.preferredModel === 'Groq' && s.groqKey) return { provider: 'Groq', apiKey: s.groqKey, model: s.groqModel || DEFAULT_GROQ_MODEL };
     if (s.preferredModel === 'OpenAI' && s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
@@ -64,7 +63,10 @@ function detectProvider(): { provider: string; apiKey: string; model?: string } 
     if (s.groqKey) return { provider: 'Meta', apiKey: s.groqKey };
     if (s.openaiKey) return { provider: 'OpenAI', apiKey: s.openaiKey };
     if (s.anthropicKey) return { provider: 'Anthropic', apiKey: s.anthropicKey };
-    return null;
+    // No key of their own: fall back to the server's shared GROQ_API_KEY. Whether
+    // this caller may actually spend it (signed in, free-tier mode, within quota)
+    // is decided by the route's entitlement guard, never here.
+    return { provider: 'test', apiKey: 'shared', model: DEFAULT_GROQ_MODEL };
 }
 
 // ── Main Component ───────────────────────────────────────────────────────────
@@ -180,7 +182,17 @@ export default function DevChat({
             });
             if (!res.ok) {
                 const errText = await res.text();
-                throw new Error(`API error ${res.status}: ${errText}`);
+                // 401/403/429 come from the entitlement guard and already carry a
+                // user-facing explanation; show it instead of the raw JSON body.
+                let guardMessage: string | null = null;
+                if ([401, 403, 429].includes(res.status)) {
+                    try {
+                        guardMessage = JSON.parse(errText)?.error ?? null;
+                    } catch {
+                        // Not a guard response — fall through to the generic message.
+                    }
+                }
+                throw new Error(guardMessage ?? `API error ${res.status}: ${errText}`);
             }
             const reader = res.body?.getReader();
             if (!reader) throw new Error('No response stream');
