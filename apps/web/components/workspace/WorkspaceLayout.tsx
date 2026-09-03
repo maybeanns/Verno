@@ -43,17 +43,6 @@ export default function WorkspaceLayout({
     visibility,
     fastTrack,
 }: WorkspaceLayoutProps) {
-    // ── Route to DevWorkspaceLayout for Develop mode ──────────────────────
-    if (mode === 'Develop') {
-        return (
-            <DevWorkspaceLayout
-                query={query}
-                projectType={projectType}
-                mode={mode}
-                visibility={visibility}
-            />
-        );
-    }
     const [prdContent, setPrdContent] = useState<string>('');
     const [prdTitle, setPrdTitle] = useState<string>('');
     const [isGenerating, setIsGenerating] = useState(true);
@@ -72,6 +61,21 @@ export default function WorkspaceLayout({
     const handleAgentMessages = useCallback((messages: AgentTranscriptMessage[]) => {
         setAgentMessages(messages);
     }, []);
+
+    // ── Route to DevWorkspaceLayout for Develop mode ──────────────────────
+    // Must come after every hook above: an early return placed ahead of them
+    // changes the hook count between renders, which React rejects outright if
+    // `mode` ever flips without this component remounting.
+    if (mode === 'Develop') {
+        return (
+            <DevWorkspaceLayout
+                query={query}
+                projectType={projectType}
+                mode={mode}
+                visibility={visibility}
+            />
+        );
+    }
 
     return (
         <div className="h-screen flex flex-col bg-[#0E0E10] overflow-hidden">

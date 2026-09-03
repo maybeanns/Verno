@@ -4,7 +4,7 @@
 
 Please do not open a public issue for security problems.
 
-Report privately through [GitHub Security Advisories](https://github.com/maybeanns/Verno/security/advisories/new). Include what you found, how to reproduce it, and what an attacker could do with it. Expect an initial response within a week.
+Report privately through [GitHub Security Advisories](https://github.com/maybeanns/AI-App-Builder-with-Agentic-Debate/security/advisories/new). Include what you found, how to reproduce it, and what an attacker could do with it. Expect an initial response within a week.
 
 ## Scope
 

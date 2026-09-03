@@ -6,7 +6,7 @@
   "publisher": "MuhammadAbuzar-dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/maybeanns/Verno"
+    "url": "https://github.com/maybeanns/AI-App-Builder-with-Agentic-Debate"
   },
   "engines": {
     "vscode": "^1.90.0"

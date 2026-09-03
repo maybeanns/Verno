@@ -26,7 +26,7 @@ export default function PricingPage() {
                         transition={{ delay: 0.1 }}
                         className="text-lg text-muted-foreground max-w-2xl mx-auto"
                     >
-                        Choose the plan that fits your team's needs. Scale your product development with AI.
+                        Choose the plan that fits your team&apos;s needs. Scale your product development with AI.
                     </motion.p>
                 </div>
 

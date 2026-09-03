@@ -2,7 +2,7 @@
 
 An open-source AI app builder. Describe what you want to build, and a panel of eight AI agents argues it into a spec before any code is written — then generates the app and previews it live in the browser.
 
-[![CI](https://github.com/maybeanns/Verno/actions/workflows/ci.yml/badge.svg)](https://github.com/maybeanns/Verno/actions)
+[![CI](https://github.com/maybeanns/AI-App-Builder-with-Agentic-Debate/actions/workflows/ci.yml/badge.svg)](https://github.com/maybeanns/AI-App-Builder-with-Agentic-Debate/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 > **Status:** early and incomplete. Verno started as a final-year project. It builds and runs, but see [Where it stands](#where-it-stands) before comparing it to a commercial product.
@@ -51,8 +51,8 @@ The two apps share `packages/agents` and `packages/llm` so the debate behaves th
 Requires Node.js 18+.
 
 ```bash
-git clone https://github.com/maybeanns/Verno.git
-cd Verno
+git clone https://github.com/maybeanns/AI-App-Builder-with-Agentic-Debate.git
+cd AI-App-Builder-with-Agentic-Debate
 npm ci
 npm run build:packages
 ```

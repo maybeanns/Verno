@@ -5,8 +5,8 @@
 Node.js 18 or newer.
 
 ```bash
-git clone https://github.com/maybeanns/Verno.git
-cd Verno
+git clone https://github.com/maybeanns/AI-App-Builder-with-Agentic-Debate.git
+cd AI-App-Builder-with-Agentic-Debate
 npm ci
 npm run build:packages
 ```

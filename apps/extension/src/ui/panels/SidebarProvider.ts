@@ -68,7 +68,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     await vscode.commands.executeCommand('verno.newTask');
                     break;
                 case 'openFeedback':
-                    vscode.env.openExternal(vscode.Uri.parse('https://github.com/maybeanns/Verno/issues'));
+                    vscode.env.openExternal(vscode.Uri.parse('https://github.com/maybeanns/AI-App-Builder-with-Agentic-Debate/issues'));
                     break;
                 case 'listConversations':
                     await vscode.commands.executeCommand('verno.listConversations');

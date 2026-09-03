@@ -7,7 +7,7 @@ export default function HeroSection() {
             {/* Main headline with gradient */}
             <h1 className="text-4xl md:text-5xl font-display font-medium mb-4 animate-fade-in tracking-tight">
                 <span className="text-gradient from-primary via-secondary to-accent bg-[length:200%_auto] animate-gradient">
-                    Have an idea? Let's build it
+                    Have an idea? Let&apos;s build it
                 </span>
             </h1>
 
