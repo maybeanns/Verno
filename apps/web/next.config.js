@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+    // Next 16 builds with Turbopack. The old webpack block only stubbed out
+    // fs/net/tls for the client bundle; Turbopack handles that itself and the
+    // build is clean without it.
     reactStrictMode: true,
     poweredByHeader: false,
 
@@ -16,16 +19,6 @@ const nextConfig = {
                 hostname: '**',
             },
         ],
-    },
-
-    webpack: (config) => {
-        config.resolve.fallback = {
-            ...config.resolve.fallback,
-            fs: false,
-            net: false,
-            tls: false,
-        };
-        return config;
     },
 };
 
