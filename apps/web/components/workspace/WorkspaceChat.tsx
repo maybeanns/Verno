@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Send, Loader2, User, Sparkles, Check, AlertCircle, ChevronRight, FileCode2, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { loadSettings } from '@/lib/settings';
-import { DEFAULT_GROQ_MODEL, GROQ_MODEL_IDS } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL, GROQ_MODEL_IDS } from '@verno/llm';
 import { loadAttachments } from '@/lib/attachments';
 import { clearPrdRun, loadPrdRun, savePrdRun, type PrdRunIdentity } from '@/lib/prd-cache';
 import { useAuth } from '@/components/auth/AuthProvider';

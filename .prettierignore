@@ -1,0 +1,8 @@
+node_modules/
+out/
+dist/
+.next/
+packages/*/dist/
+apps/extension/media/
+*.vsix
+package-lock.json

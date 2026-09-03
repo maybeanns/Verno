@@ -19,7 +19,8 @@
  */
 
 import { NextRequest } from 'next/server';
-import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL } from '@verno/llm';
+import { PERSONAS, personaRole } from '@verno/agents';
 import { guardSharedKeyUsage } from '@/lib/api-guard';
 
 import {
@@ -275,21 +276,11 @@ ${parts.join('\n\n')}
 `;
 }
 
-// ─── Agent definitions (identical to extension) ─────────────────────────────
+// ─── Agent definitions ──────────────────────────────────────────────────────
 
-const DEBATE_AGENTS = [
-    { id: 'analyst', role: 'Business Analyst (Focus on business requirements, KPIs, and user value)' },
-    { id: 'architect', role: 'System Architect (Focus on backend scalability, data models, and API design)' },
-    { id: 'ux', role: 'UX Designer (Focus on user flows, interfaces, and accessibility)' },
-    { id: 'developer', role: 'Developer (Focus on code structure, technical feasibility, and components)' },
-    { id: 'pm', role: 'Product Manager (Focus on scope, milestones, and prioritization)' },
-    { id: 'qa', role: 'QA Engineer (Focus on edge cases, testability, and test plans)' },
-    { id: 'techwriter', role: 'Technical Writer (Focus on documentation, readability, and API references)' },
-    {
-        id: 'security',
-        role: 'Security Engineer (Focus on OWASP Top 10 attack vectors, authentication and authorization design, data classification (PII/PHI), GDPR/HIPAA compliance requirements, secret management, and threat modeling for all proposed features)',
-    },
-] as const;
+// Canonical panel lives in @verno/agents. This block used to claim it was
+// "identical to extension" while the two had in fact drifted apart.
+const DEBATE_AGENTS = PERSONAS.map((p) => ({ id: p.id, role: personaRole(p) }));
 
 // Agent display colors for the frontend
 const AGENT_COLORS: Record<string, string> = {

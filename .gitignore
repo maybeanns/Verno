@@ -1,7 +1,36 @@
-node_modules
-.env
-/.agent
+# Dependencies
+node_modules/
+
+# Build output
 out/
 dist/
+.next/
+packages/*/dist/
 *.vsix
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Test artifacts
 .vscode-test/
+test-results/
+playwright-report/
+coverage/
+
+# Verno's own generated workspace artifacts
+.verno/
+
+# Local tooling and planning notes
+/.agent
+/.planning
+/scratch
+
+# Private working notes — not published
+CLAUDE.md
+
+# Editor / OS
+.DS_Store
+Thumbs.db

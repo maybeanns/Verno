@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { ProjectType } from '@/lib/types/agent-types';
 import { loadSettings, type SettingsData } from '@/lib/settings';
-import { DEFAULT_GROQ_MODEL, GROQ_MODEL_GROUPS } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL, GROQ_MODEL_GROUPS } from '@verno/llm';
 import { extractAttachments, saveAttachments } from '@/lib/attachments';
 import { buildWorkspacePath } from '@/lib/workspace-url';
 import { checkAccess, modeRequiresOwnKey, OPERATIONAL_MODES, FREE_TIER_LABEL, type OperationalMode } from '@/lib/entitlements';

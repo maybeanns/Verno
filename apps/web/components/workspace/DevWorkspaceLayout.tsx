@@ -7,7 +7,7 @@ import Link from 'next/link';
 import DevChat from './DevChat';
 import CodePanel, { type GeneratedFile } from './CodePanel';
 import { loadSettings } from '@/lib/settings';
-import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL } from '@verno/llm';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { authHeaders } from '@/lib/auth-headers';
 

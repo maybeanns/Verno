@@ -1,31 +1,70 @@
-.agent/
-.planning/
-.kiro/
-.vscode/
-.github/
-.verno/
+# ── Workspace boundary ───────────────────────────────────────────────────────
+# vsce treats the npm workspace root as the package root, so without this it
+# walks the whole monorepo — every .env, CLAUDE.md, and both stale .vsix files.
+# Exclude everything above this directory, then allow back only the shared
+# packages the extension actually needs at runtime.
+../../**
+../**
+!../../node_modules/@verno/agents/dist/**
+!../../node_modules/@verno/agents/package.json
+!../../node_modules/@verno/llm/dist/**
+!../../node_modules/@verno/llm/package.json
+
+# Never package environment files. The workspace layout means vsce can walk
+# outside this directory via the @verno/* links, so these patterns are absolute
+# guards, not cosmetics.
+**/.env
+**/.env.*
+
+# Sources and build config — only out/ ships
 src/
 tests/
-test-results/
-playwright-report/
-examples/
-node_modules/
 *.ts
 !out/**/*.js
+!out/**/*.json
+out/test/**
+**/out/test/**
 tsconfig.json
 eslint.config.mjs
 playwright.config.ts
-fix.js
+.vscode-test.mjs
 download_vad.mjs
-vsc-extension-quickstart.md
-BUGFIXES.md
-CONVERSATION_UI_COMPLETE.md
-CONVERSATION_UI_STATUS.md
-IMPLEMENTATION_PROGRESS.md
-TROUBLESHOOTING.md
-CONTRIBUTING.md
-changelog.md
-.gitignore
-website/
+
+# Local tooling, planning, and generated artifacts
+.agent/
+.planning/
+.verno/
+.vscode/
+.github/
 scratch/
+test-results/
+playwright-report/
+examples/
+
+# Separate web app, not part of the extension
+website/
+
+# Repo docs not needed inside the VSIX
+CONTRIBUTING.md
+CLAUDE.md
+docs/
+.gitignore
 *.txt
+
+# ── Optional heavy features ──────────────────────────────────────────────────
+# Bundling these puts the VSIX at ~250 MB: onnxruntime-node alone is 210 MB and
+# the mermaid-cli tree pulls a headless browser. Both are loaded with a dynamic
+# import behind a try/catch (EmbeddingService, MermaidRenderService) and the
+# extension degrades to "feature unavailable" when they are absent. Contributors
+# running from source get them from the workspace install.
+node_modules/@huggingface/**
+node_modules/onnxruntime-node/**
+node_modules/onnxruntime-web/**
+node_modules/sharp/**
+node_modules/@img/**
+node_modules/@mermaid-js/**
+node_modules/mermaid/**
+node_modules/puppeteer/**
+node_modules/puppeteer-core/**
+node_modules/@puppeteer/**
+node_modules/@napi-rs/**

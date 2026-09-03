@@ -3,7 +3,6 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
@@ -52,7 +51,8 @@ env/
 venv/
 *.egg-info/
 
-# Google Cloud - exclude all JSON except config files
-*.json
-!package.json
-!tsconfig.json
+# Service-account credentials only. Never blanket-ignore *.json — it silently
+# swallows config files like components.json and tsconfig variants.
+gcp-*.json
+service-account*.json
+*-credentials.json

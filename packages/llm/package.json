@@ -1,0 +1,17 @@
+{
+  "name": "@verno/llm",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Shared LLM provider registry and model catalog for the Verno web app and VS Code extension.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

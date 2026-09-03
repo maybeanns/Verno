@@ -6,7 +6,7 @@
  * shipped malformed ids that 404'd on every request. One definition now.
  */
 
-import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL } from '@verno/llm';
 
 export interface SettingsData {
     preferredModel: string;

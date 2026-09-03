@@ -11,7 +11,7 @@
  * silently change what gets generated.
  */
 
-import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL } from '@verno/llm';
 
 export const DEFAULT_PROJECT_TYPE = 'Full Stack App';
 export const DEFAULT_MODE = 'Generate PRD';

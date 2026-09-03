@@ -5,7 +5,7 @@ import { Send, Loader2, Sparkles, Check, AlertCircle, ChevronRight, Code2, Layer
 import { motion, AnimatePresence } from 'framer-motion';
 import { loadSettings } from '@/lib/settings';
 import type { GeneratedFile } from './CodePanel';
-import { DEFAULT_GROQ_MODEL } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL } from '@verno/llm';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { authHeaders } from '@/lib/auth-headers';
 

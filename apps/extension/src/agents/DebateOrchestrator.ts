@@ -24,22 +24,13 @@ import { VernoArtifactService } from '../services/artifact/VernoArtifactService'
 import { SecurityComplianceService } from '../services/project/SecurityComplianceService';
 import { AgentEventBus, AgentProposalEvent } from './core/AgentEventBus';
 import { ArbitratorAgent } from './core/ArbitratorAgent';
+import { PERSONAS, personaRole } from '@verno/agents';
 
 // ─── Agent definitions ────────────────────────────────────────────────────────
 
-const DEBATE_AGENTS = [
-    { id: 'analyst', role: 'Business Analyst (Focus on business requirements, KPIs, user value, pricing tiers like $99/$499/custom, free tier rate limiting, launch/GTM strategy, and detailed competitive analysis against Snyk, Detectify, Burp Suite, Qualys, Rapid7, and ZAP)' },
-    { id: 'architect', role: 'System Architect (Focus on backend scalability, data models, API spec endpoints/auth/schemas, separating UI latency <500ms from background scan duration, enforcing TLS 1.3 minimum, and clean architecture boundaries; Vite is strictly for frontend and backends/gateways must not run on Vite)' },
-    { id: 'ux', role: 'UX Designer (Focus on user flows, interfaces, 5 key states: Default, Loading, Empty, Error, Mobile/Responsive, WCAG 2.1 AA accessibility, and localization)' },
-    { id: 'developer', role: 'Developer (Focus on code structure, technical feasibility, components, and dependency maps detailing third-party services and licenses)' },
-    { id: 'pm', role: 'Product Manager (Focus on scope, milestones, prioritization, detailed 3-phase roadmap tables with resourcing and enumerated feature lists, support SLA, uptime targets, and open questions log)' },
-    { id: 'qa', role: 'QA Engineer (Focus on edge cases, testability, test plans, and enforcing testable, quantitative, non-placeholder acceptance criteria)' },
-    { id: 'techwriter', role: 'Technical Writer (Focus on documentation, readability, and API references)' },
-    {
-        id: 'security',
-        role: 'Security Engineer (Focus on OWASP Top 10 attack vectors, authentication/authorization design, TLS 1.3, HIPAA boundaries, GDPR, threat modeling, DDoS prevention on free tier, and detailed domain ownership verification specifications for scanning external domains)'
-    },
-] as const;
+// Canonical panel lives in @verno/agents so the web app and this extension
+// cannot drift apart again. See packages/agents/src/personas.ts.
+const DEBATE_AGENTS = PERSONAS.map((p) => ({ id: p.id, role: personaRole(p) }));
 
 // ─── DebateOrchestrator ───────────────────────────────────────────────────────
 

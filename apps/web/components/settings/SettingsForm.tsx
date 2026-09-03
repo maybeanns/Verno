@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Key, Server, Check, Eye, EyeOff, User as UserIcon, Sparkles, ExternalLink } from 'lucide-react';
 
-import { DEFAULT_GROQ_MODEL, GROQ_MODEL_GROUPS } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL, GROQ_MODEL_GROUPS } from '@verno/llm';
 import {
     PROVIDER_KEY_FIELD,
     PROVIDER_KEY_HINT,

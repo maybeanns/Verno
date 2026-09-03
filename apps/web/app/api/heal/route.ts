@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { DEFAULT_GROQ_MODEL, GROQ_MODEL_IDS } from '@/lib/models';
+import { DEFAULT_GROQ_MODEL, GROQ_MODEL_IDS } from '@verno/llm';
 import { guardSharedKeyUsage } from '@/lib/api-guard';
 
 interface GeneratedFile {

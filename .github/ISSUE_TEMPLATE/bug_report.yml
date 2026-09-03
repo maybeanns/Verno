@@ -1,0 +1,48 @@
+name: Bug report
+description: Something behaves differently than documented.
+labels: [bug]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which part?
+      options:
+        - Web app (apps/web)
+        - VS Code extension (apps/extension)
+        - Shared packages (packages/)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Enter the prompt ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: LLM provider and model
+      placeholder: groq / openai/gpt-oss-120b
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      placeholder: OS, Node version, VS Code version, browser
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output panel or browser console. Redact API keys before pasting.
+      render: shell

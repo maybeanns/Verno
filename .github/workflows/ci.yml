@@ -1,56 +1,87 @@
-name: Verno CI
+name: CI
 
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [main, develop]
   pull_request:
-    branches:
-      - main
-      - develop
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
+  extension:
+    name: Extension (${{ matrix.os }}, Node ${{ matrix.node-version }})
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         node-version: [18.x, 20.x]
     runs-on: ${{ matrix.os }}
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+          cache: npm
 
-      - name: Install Dependencies
+      - name: Install
         run: npm ci
 
-      - name: Compile and Type Check
-        run: npm run compile
+      - name: Build shared packages
+        run: npm run build:packages
 
-      - name: Run Tests (Linux)
+      - name: Compile
+        run: npm run compile -w verno
+
+      - name: Test (Linux needs a display)
         if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test
+        run: xvfb-run -a npm test -w verno
 
-      - name: Run Tests (Windows / macOS)
+      - name: Test
         if: runner.os != 'Linux'
-        run: npm run test
+        run: npm test -w verno
 
-      - name: Build VSIX Package (Upload Artifacts)
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
-        run: |
-          npm install -g @vscode/vsce
-          vsce package
-      
-      - name: Upload VSIX Artifact
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
-        uses: actions/upload-artifact@v4
+  web:
+    name: Web app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build shared packages
+        run: npm run build:packages
+
+      - name: Typecheck
+        run: npm run typecheck -w @verno/web
+
+      - name: Lint
+        run: npm run lint -w @verno/web
+
+      - name: Build
+        run: npm run build -w @verno/web
+
+  package:
+    name: Package VSIX
+    needs: extension
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - run: npm run package:extension
+      - uses: actions/upload-artifact@v4
         with:
           name: verno-extension
-          path: '*.vsix'
+          path: dist/*.vsix

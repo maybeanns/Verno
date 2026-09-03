@@ -1,162 +1,73 @@
 # Contributing to Verno
 
-Thank you for your interest in contributing to Verno! This guide covers everything you need to get started.
-
-## Prerequisites
-
-- **Node.js** 18 or higher
-- **VS Code** 1.80.0 or higher
-- **Git** for version control
-
 ## Setup
 
+Node.js 18 or newer.
+
 ```bash
-# Clone the repository
 git clone https://github.com/maybeanns/Verno.git
 cd Verno
-
-# Install dependencies
 npm ci
-
-# Compile TypeScript
-npm run compile
+npm run build:packages
 ```
 
-## Development
+`npm run build:packages` compiles `packages/agents` and `packages/llm`. Both apps import them, so a clean checkout will not typecheck until it has run.
 
-### Running the Extension
+## Layout
 
-1. Open the project in VS Code
-2. Press **F5** to launch the Extension Development Host
-3. The extension will activate in the new VS Code window
+```
+apps/web/          Next.js app
+apps/extension/    VS Code extension
+packages/agents/   Agent personas and debate contracts
+packages/llm/      Provider registry and model catalog
+```
 
-### Watch Mode
+If a change affects how agents behave in both surfaces, it belongs in `packages/`, not in one of the apps. The persona definitions were duplicated across both for a long time and drifted apart — please don't reintroduce that.
 
-For automatic recompilation on file changes:
+## Working on the web app
 
 ```bash
-npm run watch
+cp apps/web/.env.example apps/web/.env.local
+npm run dev:web
 ```
 
-### Project Structure
+Never put a real key in `.env.example`. If you need to show the shape of a value, use an empty assignment or an obvious placeholder.
 
-```
-src/
-├── agents/           # All agent implementations
-│   ├── BMAD/         # BMAD multi-agent pipeline agents
-│   ├── base/         # BaseAgent, AgentRegistry
-│   ├── core/         # OrchestratorAgent, RouterAgent, PlannerAgent
-│   ├── planning/     # PlanningAgent
-│   └── specialized/  # CodeGenerator, Debug, Refactor, etc.
-├── commands/         # VS Code command handlers
-├── config/           # ConfigService (SecretStorage wrapper)
-├── panels/           # SDLC webview panel
-├── services/         # All services
-│   ├── llm/          # LLMService + providers (Gemini, Groq, Anthropic, OpenAI, Mock)
-│   ├── file/         # FileService, FileChangeTracker
-│   ├── rag/          # VectorStore, EmbeddingService, ContextEngine
-│   ├── workspace/    # WorkspaceIntelligence
-│   ├── conversation/ # ConversationService
-│   ├── planning/     # PlanStateService
-│   ├── project/      # ProjectAnalyzer, OTel, Grafana, OWASP services
-│   ├── testing/      # CoverageParser
-│   ├── documentation/# ReadmeSyncService, ChangelogGenerator
-│   ├── todo/         # TodoService
-│   └── feedback/     # FeedbackService
-├── test/             # Test suites
-│   └── suite/        # Mocha test files
-├── types/            # TypeScript interfaces
-├── ui/               # UI components
-│   ├── panels/       # Sidebar providers, AgentPanel
-│   ├── onboarding/   # WelcomePanel
-│   ├── statusBar/    # RecordingStatus
-│   └── templates/    # Webview HTML templates
-├── utils/            # Logger, helpers
-└── extension.ts      # Main activation entry point
-```
-
-## Testing
-
-### Run All Tests
+## Working on the extension
 
 ```bash
-npm test
+npm run compile -w verno     # or: npm run watch -w verno
 ```
 
-This uses `@vscode/test-electron` to run Mocha tests inside a VS Code extension host.
+Open `apps/extension` in VS Code and press `F5`.
 
-### Test Files
+Two features are excluded from the packaged `.vsix` because they add roughly 180 MB: embeddings (`@huggingface/transformers`) and Mermaid rendering (`@mermaid-js/mermaid-cli`). Both are dynamically imported and degrade to "unavailable" when missing. They work normally when you run from source.
 
-Tests live in `src/test/suite/`. Key test files:
-
-| File | Tests |
-|------|-------|
-| `extension.test.ts` | Extension activation |
-| `DeveloperAgent.test.ts` | Code generation with MockLLMProvider |
-| `OrchestratorAgent.test.ts` | Multi-agent workflow routing |
-| `ConversationEngine.test.ts` | History, context building, pipeline nudges |
-
-### MockLLMProvider
-
-For deterministic testing without API calls, use `MockLLMProvider`:
-
-```typescript
-import { MockLLMProvider } from '../../services/llm/providers/MockLLMProvider';
-
-const mock = new MockLLMProvider();
-mock.enqueueResponse('{"blocks": [...]}');
-
-llmService.setProvider(mock);
-```
-
-## Linting
+## Before opening a PR
 
 ```bash
+npm run typecheck
 npm run lint
+npm test -w verno
+npm run build:web       # if you touched apps/web
 ```
 
-## Building
+`npm test -w verno` launches a real VS Code instance. On Linux it needs `xvfb-run -a` in front of it.
 
-### Compile
+## Conventions
 
-```bash
-npm run compile
-```
+- 4-space indent, single quotes, semicolons. `.editorconfig` and `.prettierrc.json` carry the details.
+- Comments should explain why something is the way it is, not restate the code.
+- Keep a PR to one concern. A refactor bundled into a bug fix is hard to review and harder to revert.
 
-### Package VSIX
+## Commit messages
 
-```bash
-npm install -g @vscode/vsce
-vsce package
-```
+Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`). The extension's changelog generator parses them.
 
-## Pull Request Process
+## Reporting bugs
 
-1. **Fork** the repository
-2. **Create a feature branch**: `git checkout -b feature/my-feature`
-3. **Make your changes** with clear, descriptive commits
-4. **Ensure CI passes**: `npm run compile && npm test`
-5. **Submit a PR** against the `main` branch
+Use the issue templates. For anything security-related, follow [SECURITY.md](./SECURITY.md) and report privately instead.
 
-### PR Requirements
+## Code of conduct
 
-- [ ] TypeScript compiles with zero errors
-- [ ] All existing tests pass
-- [ ] New features include test coverage
-- [ ] No API keys or secrets in committed code
-
-## Code Style
-
-- **TypeScript strict mode** enabled
-- **ESLint** configuration in project root
-- Use **async/await** over raw Promises
-- Document public APIs with JSDoc comments
-- Follow existing patterns in the codebase
-
-## Architecture
-
-See the [README.md](./README.md) for the full Mermaid architecture diagram showing agent relationships, LLM provider flow, and cross-cutting services.
-
----
-
-Questions? Open an issue or reach out via the repository discussions.
+[CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) applies to every interaction in this repository.

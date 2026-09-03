@@ -10,8 +10,12 @@ suite('Extension Test Suite', () => {
 
   test('Extension activation', async function () {
     this.timeout(10000); // Increase timeout to 10 seconds
-    const ext = vscode.extensions.getExtension('MuhammadAnns-dev.verno');
-    assert.ok(ext, 'Extension should be found');
+    // Derive the id from package.json so a publisher rename can't silently
+    // break this test the way a hardcoded id did.
+    const pkg = require('../../../package.json');
+    const id = `${pkg.publisher}.${pkg.name}`;
+    const ext = vscode.extensions.getExtension(id);
+    assert.ok(ext, `Extension ${id} should be found`);
 
     await ext?.activate();
     assert.ok(ext?.isActive, 'Extension should be active');
