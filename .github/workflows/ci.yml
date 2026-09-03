@@ -5,6 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,9 +20,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Node 18 is EOL and below the floor Next 16 declares for the repo-root
+        # install. macOS and Windows carry one Node version each: they exist to
+        # catch platform bugs, not version bugs.
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node-version: [18.x, 20.x]
+        node-version: [20.x, 22.x]
+        exclude:
+          - os: windows-latest
+            node-version: 22.x
+          - os: macos-latest
+            node-version: 22.x
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,6 +48,7 @@ jobs:
       - name: Compile
         run: npm run compile -w verno
 
+      # vscode-test launches a real VS Code, which needs an X server on Linux.
       - name: Test (Linux needs a display)
         if: runner.os == 'Linux'
         run: xvfb-run -a npm test -w verno
@@ -46,6 +60,7 @@ jobs:
   web:
     name: Web app
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -73,15 +88,18 @@ jobs:
     needs: extension
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20.x
           cache: npm
+      # package:extension builds the shared packages and compiles on its own.
       - run: npm ci
       - run: npm run package:extension
       - uses: actions/upload-artifact@v4
         with:
           name: verno-extension
           path: dist/*.vsix
+          if-no-files-found: error

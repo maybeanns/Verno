@@ -5,7 +5,7 @@ export default defineConfig([
 	{
 		label: 'unitTests',
 		files: 'out/test/**/*.test.js',
-		version: 'insiders',
+		version: 'stable',
 		workspaceFolder: '.',
 		mocha: {
 			ui: 'tdd',
